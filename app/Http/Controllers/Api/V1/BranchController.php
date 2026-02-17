@@ -11,7 +11,8 @@ class BranchController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Branch::with('client')->withCount('workflows', 'applicants');
+        $query = Branch::with('client')
+            ->withCount('workflows', 'applicants');
 
         if ($request->has('client_id')) {
             $query->where('client_id', $request->client_id);
@@ -41,6 +42,8 @@ class BranchController extends Controller
             'branch_name' => 'required|string|max:255',
             'location' => 'nullable|string|max:255',
             'is_active' => 'boolean',
+            'contact_person' => 'nullable|string|max:255',
+            
         ]);
 
         $branch = Branch::create($validated);
@@ -58,22 +61,26 @@ class BranchController extends Controller
         ]);
     }
 
-    public function update(Request $request, Branch $branch)
-    {
-        $validated = $request->validate([
-            'client_id' => 'sometimes|exists:clients,id',
-            'branch_name' => 'sometimes|string|max:255',
-            'location' => 'nullable|string|max:255',
-            'is_active' => 'boolean',
-        ]);
+public function update(Request $request, Branch $branch)
+{
+    $validated = $request->validate([
+        'client_id'      => 'sometimes|exists:clients,id',
+        'branch_name'    => 'sometimes|string|max:255',
+        'location'       => 'nullable|string|max:255',
+        'is_active'      => 'boolean',
+        'contact_person' => 'nullable|string|max:255',
+    ]);
 
-        $branch->update($validated);
+    \DB::table('branches')
+        ->where('id', $branch->id)
+        ->whereNull('deleted_at')
+        ->update(array_merge($validated, ['updated_at' => now()]));
 
-        return response()->json([
-            'message' => 'Branch updated successfully',
-            'branch' => $branch->load('client'),
-        ]);
-    }
+    return response()->json([
+        'message' => 'Branch updated successfully',
+        'branch'  => $branch->fresh()->load('client'),
+    ]);
+}
 
     public function destroy(Branch $branch)
     {
@@ -87,6 +94,7 @@ class BranchController extends Controller
     public function byClient(Client $client)
     {
         $branches = $client->branches()
+            ->with('client')
             ->withCount('workflows', 'applicants')
             ->get();
 

@@ -66,6 +66,7 @@ class Applicant extends Model
 
                 // Log activity
                 $this->activities()->create([
+                    // @phpstan-ignore-next-line
                     'user_id' => auth()->id(),
                     'activity_type' => 'step_change',
                     'description' => "Moved from '{$this->currentStep->step_name}' to '{$nextStep->step_name}'",

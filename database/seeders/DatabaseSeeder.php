@@ -14,6 +14,7 @@ class DatabaseSeeder extends Seeder
             ClientSeeder::class,
             BranchSeeder::class,
             WorkflowSeeder::class,
+            PositionSeeder::class,
         ]);
     }
 }

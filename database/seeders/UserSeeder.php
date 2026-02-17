@@ -18,33 +18,17 @@ class UserSeeder extends Seeder
         ]);
         $superAdmin->assignRole('super_admin');
 
-        // Admin
-        $admin = User::create([
-            'name' => 'Admin User',
-            'email' => 'admin@garuda.com',
+        // HR Admin
+        $hrAdmin = User::create([
+            'name' => 'HR Admin',
+            'email' => 'hradmin@garuda.com',
             'password' => Hash::make('password'),
         ]);
-        $admin->assignRole('admin');
-
-        // HR Manager
-        $hrManager = User::create([
-            'name' => 'HR Manager',
-            'email' => 'hrmanager@garuda.com',
-            'password' => Hash::make('password'),
-        ]);
-        $hrManager->assignRole('hr_manager');
-
-        // HR Staff
-        $hrStaff = User::create([
-            'name' => 'HR Staff',
-            'email' => 'hrstaff@garuda.com',
-            'password' => Hash::make('password'),
-        ]);
-        $hrStaff->assignRole('hr_staff');
+        $hrAdmin->assignRole('hr_admin');
 
         // Talent Acquisition
         $ta = User::create([
-            'name' => 'Talent Acquisition',
+            'name' => 'John Recruiter',
             'email' => 'ta@garuda.com',
             'password' => Hash::make('password'),
         ]);

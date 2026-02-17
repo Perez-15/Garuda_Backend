@@ -11,6 +11,8 @@ use App\Http\Controllers\Api\V1\WorkflowStepController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\Public\ApplicationController;
+use App\Http\Controllers\Api\V1\PositionController;
+use App\Http\Controllers\Api\V1\UserController;
 
 /*
 |--------------------------------------------------------------------------
@@ -42,8 +44,14 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
 
+    // Users Management
+    Route::apiResource('users', UserController::class);
+    Route::patch('users/{user}/status', [UserController::class, 'updateStatus']);
+
     // Dashboard
     Route::get('/dashboard', [DashboardController::class, 'index']);
+    // Positions
+    Route::apiResource('positions', PositionController::class);
 
     // Applicants
     Route::apiResource('applicants', ApplicantController::class);

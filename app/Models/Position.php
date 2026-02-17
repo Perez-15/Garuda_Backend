@@ -6,17 +6,17 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class Branch extends Model
+class Position extends Model
 {
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'client_id',
-        'branch_name',
-        'location',
+        'branch_id',
+        'title',
+        'description',
+        'slots',
         'is_active',
-        'rm_name',
-        'arm_name',
     ];
 
     protected $casts = [
@@ -28,13 +28,8 @@ class Branch extends Model
         return $this->belongsTo(Client::class);
     }
 
-    public function workflows()
+    public function branch()
     {
-        return $this->hasMany(Workflow::class);
-    }
-
-    public function applicants()
-    {
-        return $this->hasMany(Applicant::class);
+        return $this->belongsTo(Branch::class);
     }
 }
