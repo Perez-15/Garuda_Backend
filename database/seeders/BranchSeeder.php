@@ -51,11 +51,6 @@ class BranchSeeder extends Seeder
             'is_active' => true,
         ]);
 
-        Branch::create([
-            'client_id' => $Jaicom->id,
-            'branch_name' => 'Jaicom Ortigas Center',
-            'location' => '10th Floor, Strata 2000 Building. Ortigas, Pasig City',
-            'is_active' => true,
-        ]);
+       
     }
 }

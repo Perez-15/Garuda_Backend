@@ -16,14 +16,14 @@ class ClientSeeder extends Seeder
         ]);
 
         Client::create([
-            'name' => 'SM Retail',
+            'name' => 'Burlingtong',
             'type' => 'Retail',
             'is_active' => true,
         ]);
 
         Client::create([
-            'name' => 'Jollibee Foods Corporation',
-            'type' => 'Food & Beverage',
+            'name' => 'Jaicom',
+            'type' => 'BPO',
             'is_active' => true,
         ]);
     }

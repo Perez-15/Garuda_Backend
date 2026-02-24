@@ -15,8 +15,7 @@ class Branch extends Model
         'branch_name',
         'location',
         'is_active',
-        'rm_name',
-        'arm_name',
+        'contact_person',
     ];
 
     protected $casts = [
