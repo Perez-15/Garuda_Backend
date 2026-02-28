@@ -82,4 +82,5 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('reports/applicants-by-branch', [ReportController::class, 'applicantsByBranch']);
     Route::get('reports/conversion-rate', [ReportController::class, 'conversionRate']);
     Route::get('reports/export', [ReportController::class, 'export']);
-});
+    Route::get('/reports/top-recruiters', [ReportController::class, 'topRecruiters']);
+    });
