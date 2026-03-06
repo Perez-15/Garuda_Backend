@@ -11,81 +11,164 @@ use Illuminate\Support\Facades\Storage;
 
 class ApplicantController extends Controller
 {
-    public function index(Request $request)
+    // ── Helpers ────────────────────────────────────────────────────────────────
+
+    private function allowedBranchIds(): ?array
     {
-        $query = Applicant::with(['branch.client', 'workflow', 'currentStep']);
+        return auth()->user()->assignedBranchIds();
+    }
 
-        // ── Filters ──────────────────────────────────────────────
+    private function scopeToBranches($query)
+    {
+        $branchIds = $this->allowedBranchIds();
+        if ($branchIds !== null) {
+            $query->whereIn('branch_id', $branchIds);
+        }
+        return $query;
+    }
 
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
+    /**
+     * Check if the authenticated user can modify (edit/delete/act on) an applicant.
+     * - super_admin / hr_admin  → always allowed
+     * - talent_acquisition      → only if they personally created the applicant
+     */
+    private function canModify(Applicant $applicant): bool
+    {
+        $user = auth()->user();
+        if ($user->hasRole(['super_admin', 'hr_admin'])) {
+            return true;
+        }
+        return (int) $applicant->created_by === (int) $user->id;
+    }
+
+    private function applyAdminFilters($query, Request $request)
+    {
+        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
+            return $query;
         }
 
-        if ($request->has('source')) {
-            $query->where('source', $request->source);
+        if ($request->filled('ta_id')) {
+            $query->where('created_by', $request->ta_id);
         }
 
-        if ($request->has('branch_id')) {
-            $query->where('branch_id', $request->branch_id);
-        }
-
-        if ($request->has('current_step_id')) {
-            $query->where('current_step_id', $request->current_step_id);
-        }
-
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('full_name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%")
-                  ->orWhere('phone', 'like', "%{$search}%");
-            });
-        }
-
-        // ── Date Filter ───────────────────────────────────────────
-        // Handles: today, this_week, this_month from frontend sortFilter
-
-        if ($request->has('date_filter')) {
-            switch ($request->date_filter) {
+        if ($request->filled('period')) {
+            switch ($request->period) {
                 case 'today':
                     $query->whereDate('applied_at', today());
                     break;
-
                 case 'this_week':
-                    $query->whereBetween('applied_at', [
-                        now()->startOfWeek(),
-                        now()->endOfWeek(),
-                    ]);
+                    $query->whereBetween('applied_at', [now()->startOfWeek(), now()->endOfWeek()]);
                     break;
-
                 case 'this_month':
                     $query->whereMonth('applied_at', now()->month)
-                          ->whereYear('applied_at', now()->year);
+                          ->whereYear('applied_at',  now()->year);
+                    break;
+                case 'this_year':
+                    $query->whereYear('applied_at', now()->year);
                     break;
             }
         }
 
-        // ── Sorting ───────────────────────────────────────────────
-        // Whitelist allowed columns to prevent SQL injection
+        return $query;
+    }
+
+    private function applyDateFilter($query, Request $request)
+    {
+        if (!$request->filled('date_filter')) {
+            return $query;
+        }
+
+        switch ($request->date_filter) {
+            case 'today':
+                $query->whereDate('applied_at', today());
+                break;
+            case 'this_week':
+                $query->whereBetween('applied_at', [now()->startOfWeek(), now()->endOfWeek()]);
+                break;
+            case 'this_month':
+                $query->whereMonth('applied_at', now()->month)
+                      ->whereYear('applied_at',  now()->year);
+                break;
+        }
+
+        return $query;
+    }
+
+    private function applyCommonFilters($query, Request $request)
+    {
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+        if ($request->filled('source')) {
+            $query->where('source', $request->source);
+        }
+        if ($request->filled('branch_id')) {
+            $query->where('branch_id', $request->branch_id);
+        }
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('full_name', 'like', "%{$search}%")
+                  ->orWhere('email',   'like', "%{$search}%")
+                  ->orWhere('phone',   'like', "%{$search}%");
+            });
+        }
+
+        // scope=own — used by InProcessPage for TA users so they only see
+        // applicants they personally added.
+        if ($request->get('scope') === 'own') {
+            $query->where('created_by', auth()->id());
+        }
+
+        $this->applyDateFilter($query, $request);
+        $this->applyAdminFilters($query, $request);
+
+        return $query;
+    }
+
+    // ── Index ──────────────────────────────────────────────────────────────────
+    // No branch scoping — all roles see all applicants.
+
+    public function index(Request $request)
+    {
+        $query = Applicant::with(['branch.client', 'workflow', 'currentStep', 'createdBy']);
+
+        $this->applyCommonFilters($query, $request);
 
         $allowedSortColumns = ['applied_at', 'full_name'];
         $sortBy  = in_array($request->get('sort_by'), $allowedSortColumns)
-                    ? $request->get('sort_by')
-                    : 'applied_at';
-
-        // Frontend sends sort_dir (was sort_order before — now fixed)
+                    ? $request->get('sort_by') : 'applied_at';
         $sortDir = in_array($request->get('sort_dir'), ['asc', 'desc'])
-                    ? $request->get('sort_dir')
-                    : 'desc';
+                    ? $request->get('sort_dir') : 'desc';
 
         $query->orderBy($sortBy, $sortDir);
 
-        // ── Paginate ──────────────────────────────────────────────
+        $perPage = in_array((int) $request->get('per_page'), [15, 30, 50])
+                    ? (int) $request->get('per_page') : 15;
 
-        $applicants = $query->paginate($request->get('per_page', 15));
-
-        return response()->json($applicants);
+        return response()->json($query->paginate($perPage));
     }
+
+    // ── Stats ──────────────────────────────────────────────────────────────────
+
+    public function stats(Request $request)
+    {
+        $base = Applicant::query();
+
+        $this->applyCommonFilters($base, $request);
+
+        return response()->json([
+            'in_process' => (clone $base)->where('status', 'active')->count(),
+            'hired'      => (clone $base)->where('status', 'hired')->count(),
+            'pooling'    => (clone $base)->where('status', 'pooling')->count(),
+            'this_month' => (clone $base)
+                                ->whereMonth('applied_at', now()->month)
+                                ->whereYear('applied_at',  now()->year)
+                                ->count(),
+        ]);
+    }
+
+    // ── Store ──────────────────────────────────────────────────────────────────
 
     public function store(Request $request)
     {
@@ -99,33 +182,32 @@ class ApplicantController extends Controller
             'notes'     => 'nullable|string',
         ]);
 
-        // Get active workflow for the branch
+        $branchIds = $this->allowedBranchIds();
+        if ($branchIds !== null && !in_array($validated['branch_id'], $branchIds)) {
+            return response()->json(['message' => 'You are not assigned to this branch.'], 403);
+        }
+
         $workflow = Workflow::where('branch_id', $validated['branch_id'])
             ->where('is_active', true)
             ->first();
 
         if (!$workflow) {
-            return response()->json([
-                'message' => 'No active workflow found for this branch',
-            ], 400);
+            return response()->json(['message' => 'No active workflow found for this branch.'], 400);
         }
 
-        // Get first step of workflow
         $firstStep = $workflow->steps()->orderBy('step_order')->first();
 
-        // Handle resume upload
         if ($request->hasFile('resume')) {
-            $resumePath = $request->file('resume')->store('resumes', 'public');
-            $validated['resume_path'] = $resumePath;
+            $validated['resume_path'] = $request->file('resume')->store('resumes', 'public');
         }
 
-        $validated['workflow_id']      = $workflow->id;
-        $validated['current_step_id']  = $firstStep?->id;
-        $validated['applied_at']       = now();
+        $validated['workflow_id']     = $workflow->id;
+        $validated['current_step_id'] = $firstStep?->id;
+        $validated['applied_at']      = now();
+        $validated['created_by']      = auth()->id();
 
         $applicant = Applicant::create($validated);
 
-        // Log activity
         $applicant->activities()->create([
             'user_id'       => auth()->id(),
             'activity_type' => 'created',
@@ -134,9 +216,12 @@ class ApplicantController extends Controller
 
         return response()->json([
             'message'   => 'Applicant created successfully',
-            'applicant' => $applicant->load(['branch.client', 'workflow', 'currentStep']),
+            'applicant' => $applicant->load(['branch.client', 'workflow', 'currentStep', 'createdBy']),
         ], 201);
     }
+
+    // ── Show ───────────────────────────────────────────────────────────────────
+    // Anyone can view any applicant — no access restrictions on read.
 
     public function show(Applicant $applicant)
     {
@@ -146,34 +231,39 @@ class ApplicantController extends Controller
                 'workflow.steps',
                 'currentStep',
                 'notes.user',
-                'activities.user',
+                'activities.user.roles',
+                'createdBy',
+                'employee',
             ]),
         ]);
     }
 
+    // ── Update ─────────────────────────────────────────────────────────────────
+
     public function update(Request $request, Applicant $applicant)
     {
+        if (!$this->canModify($applicant)) {
+            return response()->json(['message' => 'You can only edit applicants you added.'], 403);
+        }
+
         $validated = $request->validate([
             'full_name' => 'sometimes|string|max:255',
             'email'     => 'sometimes|email|unique:applicants,email,' . $applicant->id,
             'phone'     => 'sometimes|string|max:20',
+            'source'    => 'sometimes|string',
             'notes'     => 'nullable|string',
             'resume'    => 'nullable|file|mimes:pdf,doc,docx|max:5120',
         ]);
 
-        // Handle resume upload
         if ($request->hasFile('resume')) {
-            // Delete old resume first
             if ($applicant->resume_path) {
                 Storage::disk('public')->delete($applicant->resume_path);
             }
-            $resumePath = $request->file('resume')->store('resumes', 'public');
-            $validated['resume_path'] = $resumePath;
+            $validated['resume_path'] = $request->file('resume')->store('resumes', 'public');
         }
 
         $applicant->update($validated);
 
-        // Log activity
         $applicant->activities()->create([
             'user_id'       => auth()->id(),
             'activity_type' => 'updated',
@@ -182,51 +272,54 @@ class ApplicantController extends Controller
 
         return response()->json([
             'message'   => 'Applicant updated successfully',
-            'applicant' => $applicant->load(['branch.client', 'workflow', 'currentStep']),
+            'applicant' => $applicant->load(['branch.client', 'workflow', 'currentStep', 'createdBy']),
         ]);
     }
 
+    // ── Destroy ────────────────────────────────────────────────────────────────
+
     public function destroy(Applicant $applicant)
     {
-        // Delete resume file if exists
+        if (!$this->canModify($applicant)) {
+            return response()->json(['message' => 'You can only delete applicants you added.'], 403);
+        }
+
         if ($applicant->resume_path) {
             Storage::disk('public')->delete($applicant->resume_path);
         }
 
         $applicant->delete();
 
-        return response()->json([
-            'message' => 'Applicant deleted successfully',
-        ]);
+        return response()->json(['message' => 'Applicant deleted successfully']);
     }
+
+    // ── Move Step ──────────────────────────────────────────────────────────────
 
     public function moveStep(Request $request, Applicant $applicant)
     {
+        if (!$this->canModify($applicant)) {
+            return response()->json(['message' => 'You can only move steps for applicants you added.'], 403);
+        }
+
         $request->validate([
             'direction' => 'required|in:next,previous,specific',
             'step_id'   => 'required_if:direction,specific|exists:workflow_steps,id',
         ]);
 
         $oldStep = $applicant->currentStep;
-
-        if ($request->direction === 'next') {
-            $newStep = $oldStep->nextStep();
-        } elseif ($request->direction === 'previous') {
-            $newStep = $oldStep->previousStep();
-        } else {
-            $newStep = \App\Models\WorkflowStep::find($request->step_id);
-        }
+        $newStep = match ($request->direction) {
+            'next'     => $oldStep->nextStep(),
+            'previous' => $oldStep->previousStep(),
+            default    => \App\Models\WorkflowStep::find($request->step_id),
+        };
 
         if (!$newStep) {
-            return response()->json([
-                'message' => 'No step found in that direction',
-            ], 400);
+            return response()->json(['message' => 'No step found in that direction.'], 400);
         }
 
         $applicant->current_step_id = $newStep->id;
         $applicant->save();
 
-        // Log activity
         $applicant->activities()->create([
             'user_id'       => auth()->id(),
             'activity_type' => 'step_change',
@@ -238,22 +331,27 @@ class ApplicantController extends Controller
         ]);
 
         return response()->json([
-            'message'   => 'Applicant moved to next step successfully',
+            'message'   => 'Applicant moved successfully',
             'applicant' => $applicant->load(['branch.client', 'workflow', 'currentStep']),
         ]);
     }
 
+    // ── Update Status ──────────────────────────────────────────────────────────
+
     public function updateStatus(Request $request, Applicant $applicant)
     {
+        if (!$this->canModify($applicant)) {
+            return response()->json(['message' => 'You can only update status for applicants you added.'], 403);
+        }
+
         $request->validate([
-            'status' => 'required|in:active,withdrawn,hired,rejected',
+            'status' => 'required|in:active,pooling',
         ]);
 
-        $oldStatus       = $applicant->status;
+        $oldStatus         = $applicant->status;
         $applicant->status = $request->status;
         $applicant->save();
 
-        // Log activity
         $applicant->activities()->create([
             'user_id'       => auth()->id(),
             'activity_type' => 'status_change',
@@ -266,11 +364,15 @@ class ApplicantController extends Controller
         ]);
     }
 
+    // ── Add Note ───────────────────────────────────────────────────────────────
+
     public function addNote(Request $request, Applicant $applicant)
     {
-        $request->validate([
-            'note' => 'required|string',
-        ]);
+        if (!$this->canModify($applicant)) {
+            return response()->json(['message' => 'You can only add notes to applicants you added.'], 403);
+        }
+
+        $request->validate(['note' => 'required|string']);
 
         $note = ApplicantNote::create([
             'applicant_id' => $applicant->id,
@@ -278,7 +380,6 @@ class ApplicantController extends Controller
             'note'         => $request->note,
         ]);
 
-        // Log activity
         $applicant->activities()->create([
             'user_id'       => auth()->id(),
             'activity_type' => 'note_added',
@@ -290,6 +391,9 @@ class ApplicantController extends Controller
             'note'    => $note->load('user'),
         ], 201);
     }
+
+    // ── Activities ─────────────────────────────────────────────────────────────
+    // Anyone can view activity history.
 
     public function activities(Applicant $applicant)
     {

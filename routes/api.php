@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\Public\ApplicationController;
 use App\Http\Controllers\Api\V1\PositionController;
 use App\Http\Controllers\Api\V1\UserController;
+use App\Http\Controllers\Api\V1\EmployeeController;
 
 /*
 |--------------------------------------------------------------------------
@@ -39,7 +40,7 @@ Route::prefix('v1')->group(function () {
 |--------------------------------------------------------------------------
 */
 Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
-    
+
     // Auth
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
@@ -47,18 +48,35 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // Users Management
     Route::apiResource('users', UserController::class);
     Route::patch('users/{user}/status', [UserController::class, 'updateStatus']);
+    Route::post('users/{user}/branches', [UserController::class, 'assignBranches']);
+    Route::get('users/{user}/branches',  [UserController::class, 'branches']);
 
     // Dashboard
     Route::get('/dashboard', [DashboardController::class, 'index']);
+
     // Positions
     Route::apiResource('positions', PositionController::class);
 
     // Applicants
+    Route::get('applicants/stats', [ApplicantController::class, 'stats']);
     Route::apiResource('applicants', ApplicantController::class);
     Route::patch('applicants/{applicant}/move-step', [ApplicantController::class, 'moveStep']);
-    Route::patch('applicants/{applicant}/status', [ApplicantController::class, 'updateStatus']);
-    Route::post('applicants/{applicant}/notes', [ApplicantController::class, 'addNote']);
-    Route::get('applicants/{applicant}/activities', [ApplicantController::class, 'activities']);
+    Route::patch('applicants/{applicant}/status',    [ApplicantController::class, 'updateStatus']);
+    Route::post('applicants/{applicant}/notes',      [ApplicantController::class, 'addNote']);
+    Route::get('applicants/{applicant}/activities',  [ApplicantController::class, 'activities']);
+
+    // ── Employees ──────────────────────────────────────────────────────────────
+    // IMPORTANT: stats and convert must be declared BEFORE apiResource
+    // so Laravel doesn't treat them as {employee} wildcards
+    Route::get('employees/stats',                    [EmployeeController::class, 'stats']);
+    Route::post('employees/convert/{applicant}',     [EmployeeController::class, 'convertFromApplicant']);
+    Route::apiResource('employees', EmployeeController::class);
+    Route::patch('employees/{employee}/status',      [EmployeeController::class, 'updateStatus']);
+
+    // HR Actions (Memo / IR / LOA)
+    Route::get('employees/{employee}/hr-actions',             [EmployeeController::class, 'hrActions']);
+    Route::post('employees/{employee}/hr-actions',            [EmployeeController::class, 'addHrAction']);
+    Route::delete('employees/{employee}/hr-actions/{action}', [EmployeeController::class, 'deleteHrAction']);
 
     // Clients
     Route::apiResource('clients', ClientController::class);
@@ -69,18 +87,18 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
     // Workflows
     Route::apiResource('workflows', WorkflowController::class);
-    Route::get('branches/{branch}/workflows', [WorkflowController::class, 'byBranch']);
-    Route::post('workflows/{workflow}/steps/reorder', [WorkflowController::class, 'reorderSteps']);
+    Route::get('branches/{branch}/workflows',          [WorkflowController::class, 'byBranch']);
+    Route::post('workflows/{workflow}/steps/reorder',  [WorkflowController::class, 'reorderSteps']);
 
     // Workflow Steps
     Route::apiResource('workflow-steps', WorkflowStepController::class)->except(['index']);
     Route::get('workflows/{workflow}/steps', [WorkflowStepController::class, 'byWorkflow']);
 
     // Reports
-    Route::get('reports/applicants-by-source', [ReportController::class, 'applicantsBySource']);
-    Route::get('reports/applicants-by-status', [ReportController::class, 'applicantsByStatus']);
-    Route::get('reports/applicants-by-branch', [ReportController::class, 'applicantsByBranch']);
-    Route::get('reports/conversion-rate', [ReportController::class, 'conversionRate']);
-    Route::get('reports/export', [ReportController::class, 'export']);
-    Route::get('/reports/top-recruiters', [ReportController::class, 'topRecruiters']);
-    });
+    Route::get('reports/applicants-by-source',  [ReportController::class, 'applicantsBySource']);
+    Route::get('reports/applicants-by-status',  [ReportController::class, 'applicantsByStatus']);
+    Route::get('reports/applicants-by-branch',  [ReportController::class, 'applicantsByBranch']);
+    Route::get('reports/conversion-rate',       [ReportController::class, 'conversionRate']);
+    Route::get('reports/export',                [ReportController::class, 'export']);
+    Route::get('reports/top-recruiters',        [ReportController::class, 'topRecruiters']);
+});

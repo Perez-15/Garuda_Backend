@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Applicant;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Barryvdh\DomPDF\Facade\Pdf;
+
 
 class ReportController extends Controller
 {
@@ -112,23 +114,18 @@ class ReportController extends Controller
     // ── Top Recruiters ─────────────────────────────────────────────────────────
     public function topRecruiters(Request $request)
     {
-        // Base query — count applicants added per user
         $query = DB::table('applicant_activities')
             ->join('users', 'applicant_activities.user_id', '=', 'users.id')
             ->join('applicants', 'applicant_activities.applicant_id', '=', 'applicants.id')
             ->select(
                 'users.id',
                 'users.name',
-                // Total applicants they added
                 DB::raw('COUNT(CASE WHEN applicant_activities.activity_type = "created" THEN 1 END) as total_added'),
-                // Total they got hired
                 DB::raw('COUNT(CASE WHEN applicant_activities.activity_type = "status_change" AND applicant_activities.description LIKE "%to \'hired\'%" THEN 1 END) as total_hired'),
-                // Total step movements (shows activity level)
                 DB::raw('COUNT(CASE WHEN applicant_activities.activity_type = "step_change" THEN 1 END) as total_steps_moved')
             )
             ->whereNull('applicants.deleted_at');
 
-        // Apply date filter on activity created_at
         if ($request->filled('start_date') && $request->filled('end_date')) {
             $query->whereBetween('applicant_activities.created_at', [
                 $request->start_date . ' 00:00:00',
@@ -136,12 +133,10 @@ class ReportController extends Controller
             ]);
         }
 
-        // Apply branch filter
         if ($request->filled('branch_id')) {
             $query->where('applicants.branch_id', $request->branch_id);
         }
 
-        // Apply client filter
         if ($request->filled('client_id')) {
             $query->join('branches', 'applicants.branch_id', '=', 'branches.id')
                   ->where('branches.client_id', $request->client_id);
@@ -153,7 +148,6 @@ class ReportController extends Controller
             ->limit(5)
             ->get()
             ->map(function ($recruiter) {
-                // Calculate personal conversion rate
                 $recruiter->conversion_rate = $recruiter->total_added > 0
                     ? round(($recruiter->total_hired / $recruiter->total_added) * 100, 1)
                     : 0;
@@ -166,23 +160,98 @@ class ReportController extends Controller
     // ── Export ─────────────────────────────────────────────────────────────────
     public function export(Request $request)
     {
-        $query = Applicant::with(['branch.client', 'workflow', 'currentStep']);
-
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
-        }
-
+        // 1. Base Query
+        $query = Applicant::query();
         $this->applyDateFilter($query, $request);
 
         if ($request->filled('branch_id')) {
             $query->where('branch_id', $request->branch_id);
         }
+        if ($request->filled('client_id')) {
+            $query->whereHas('branch', fn($q) => $q->where('client_id', $request->client_id));
+        }
 
         $applicants = $query->get();
 
-        return response()->json([
-            'message' => 'Export functionality - integrate with Excel package',
-            'count'   => $applicants->count(),
+        // 2. Summary
+        $totalApplicants = $applicants->count();
+        $hired           = $applicants->where('status', 'hired')->count();
+        $active          = $applicants->where('status', 'active')->count();
+        $rejected        = $applicants->where('status', 'rejected')->count();
+        $conversionRate  = $totalApplicants > 0
+            ? round(($hired / $totalApplicants) * 100, 1)
+            : 0;
+
+        // 3. Grouped Data
+        $bySource = $applicants->groupBy('source')->map(fn($items) => $items->count());
+        $byStatus = $applicants->groupBy('status')->map(fn($items) => $items->count());
+
+        // 4. Branch Performance
+        $byBranch = Applicant::select('branches.branch_name', DB::raw('count(*) as count'))
+            ->join('branches', 'applicants.branch_id', '=', 'branches.id')
+            ->groupBy('branches.id', 'branches.branch_name')
+            ->orderByDesc('count');
+
+        $this->applyDateFilter($byBranch, $request, 'applicants.created_at');
+
+        if ($request->filled('client_id')) {
+            $byBranch->where('branches.client_id', $request->client_id);
+        }
+        if ($request->filled('branch_id')) {
+            $byBranch->where('applicants.branch_id', $request->branch_id);
+        }
+
+        $byBranch = $byBranch->get();
+
+        // 5. Top Recruiters
+        $recruiterQuery = DB::table('applicant_activities')
+            ->join('users', 'applicant_activities.user_id', '=', 'users.id')
+            ->join('applicants', 'applicant_activities.applicant_id', '=', 'applicants.id')
+            ->select(
+                'users.name',
+                DB::raw('COUNT(CASE WHEN applicant_activities.activity_type = "created" THEN 1 END) as total_added'),
+                DB::raw('COUNT(CASE WHEN applicant_activities.activity_type = "status_change" AND applicant_activities.description LIKE "%to \'hired\'%" THEN 1 END) as total_hired')
+            )
+            ->whereNull('applicants.deleted_at');
+
+        if ($request->filled('start_date') && $request->filled('end_date')) {
+            $recruiterQuery->whereBetween('applicant_activities.created_at', [
+                $request->start_date . ' 00:00:00',
+                $request->end_date   . ' 23:59:59',
+            ]);
+        }
+
+        if ($request->filled('branch_id')) {
+            $recruiterQuery->where('applicants.branch_id', $request->branch_id);
+        }
+
+        if ($request->filled('client_id')) {
+            $recruiterQuery->join('branches', 'applicants.branch_id', '=', 'branches.id')
+                           ->where('branches.client_id', $request->client_id);
+        }
+
+        $recruiters = $recruiterQuery
+            ->groupBy('users.id', 'users.name')
+            ->orderByDesc('total_added')
+            ->limit(5)
+            ->get();
+
+        // 6. Generate PDF
+        $pdf = Pdf::loadView('reports.export', [
+            'companyName'     => 'Garuda Recruitment Agency',
+            'totalApplicants' => $totalApplicants,
+            'hired'           => $hired,
+            'active'          => $active,
+            'rejected'        => $rejected,
+            'conversionRate'  => $conversionRate,
+            'bySource'        => $bySource,
+            'byStatus'        => $byStatus,
+            'byBranch'        => $byBranch,
+            'recruiters'      => $recruiters,
+            'startDate'       => $request->start_date,
+            'endDate'         => $request->end_date,
         ]);
+
+        return $pdf->download('garuda-report-' . now()->format('Y-m-d') . '.pdf');
     }
 }

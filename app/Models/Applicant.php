@@ -22,6 +22,7 @@ class Applicant extends Model
         'notes',
         'applied_at',
         'status',
+        'created_by', 
     ];
 
     protected $casts = [
@@ -54,12 +55,23 @@ class Applicant extends Model
         return $this->hasMany(ApplicantActivity::class)->orderBy('created_at', 'desc');
     }
 
+    // ← NEW: tracks which TA added this applicant
+    public function createdBy()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function employee()
+{
+    return $this->hasOne(Employee::class, 'applicant_id');
+}
+
     // Helper method to move to next step
     public function moveToNextStep()
     {
         if ($this->currentStep) {
             $nextStep = $this->currentStep->nextStep();
-            
+
             if ($nextStep) {
                 $this->current_step_id = $nextStep->id;
                 $this->save();
@@ -67,12 +79,12 @@ class Applicant extends Model
                 // Log activity
                 $this->activities()->create([
                     // @phpstan-ignore-next-line
-                    'user_id' => auth()->id(),
+                    'user_id'       => auth()->id(),
                     'activity_type' => 'step_change',
-                    'description' => "Moved from '{$this->currentStep->step_name}' to '{$nextStep->step_name}'",
-                    'metadata' => json_encode([
+                    'description'   => "Moved from '{$this->currentStep->step_name}' to '{$nextStep->step_name}'",
+                    'metadata'      => json_encode([
                         'from_step' => $this->currentStep->id,
-                        'to_step' => $nextStep->id,
+                        'to_step'   => $nextStep->id,
                     ]),
                 ]);
 

@@ -12,86 +12,101 @@ class RoleSeeder extends Seeder
     {
         app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
 
-        // Create permissions
+        // ── Permissions ────────────────────────────────────────────────────────
+
         $permissions = [
+            // Applicants
             'view_applicants',
             'create_applicants',
             'edit_applicants',
             'delete_applicants',
             'move_applicant_step',
-            
+
+            // Clients
             'view_clients',
             'create_clients',
             'edit_clients',
             'delete_clients',
-            
+
+            // Branches
             'view_branches',
             'create_branches',
             'edit_branches',
             'delete_branches',
-            
+
+            // Workflows
             'view_workflows',
             'create_workflows',
             'edit_workflows',
             'delete_workflows',
-            
+
+            // Positions
             'view_positions',
             'create_positions',
             'edit_positions',
             'delete_positions',
-            
+
+            // Reports
             'view_reports',
             'export_reports',
-            
-            'manage_users', // Add/edit/delete users
+
+            // Users
+            'manage_users',       // Add / edit / delete users
+            'assign_branches',    // Assign branches to TA users ← NEW
         ];
 
         foreach ($permissions as $permission) {
-            Permission::create(['name' => $permission]);
+            Permission::firstOrCreate(['name' => $permission]);
         }
 
-        // Super Admin - ALL permissions
-        $superAdmin = Role::create(['name' => 'super_admin']);
+        // ── Super Admin — everything ───────────────────────────────────────────
+
+        $superAdmin = Role::firstOrCreate(['name' => 'super_admin']);
         $superAdmin->givePermissionTo(Permission::all());
 
-        // HR Admin - Can manage everything except super admin users
-        $hrAdmin = Role::create(['name' => 'hr_admin']);
-        $hrAdmin->givePermissionTo([
+        // ── HR Admin ───────────────────────────────────────────────────────────
+
+        $hrAdmin = Role::firstOrCreate(['name' => 'hr_admin']);
+        $hrAdmin->syncPermissions([
             'view_applicants',
             'create_applicants',
             'edit_applicants',
             'delete_applicants',
             'move_applicant_step',
-            
+
             'view_clients',
             'create_clients',
             'edit_clients',
             'delete_clients',
-            
+
             'view_branches',
             'create_branches',
             'edit_branches',
             'delete_branches',
-            
+
             'view_workflows',
             'create_workflows',
             'edit_workflows',
             'delete_workflows',
-            
+
             'view_positions',
             'create_positions',
             'edit_positions',
             'delete_positions',
-            
+
             'view_reports',
             'export_reports',
-            
-            'manage_users', // Can add/edit TA users only
+
+            'manage_users',
+            'assign_branches',   // HR Admin can manage TA branch access ← NEW
         ]);
 
-        // Talent Acquisition - Recruiting focused
-        $ta = Role::create(['name' => 'talent_acquisition']);
-        $ta->givePermissionTo([
+        // ── Talent Acquisition ─────────────────────────────────────────────────
+        // Scoped to assigned branches via ApplicantController logic,
+        // NOT via permissions — the controller handles the restriction.
+
+        $ta = Role::firstOrCreate(['name' => 'talent_acquisition']);
+        $ta->syncPermissions([
             'view_applicants',
             'create_applicants',
             'edit_applicants',
