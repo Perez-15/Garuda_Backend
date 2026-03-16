@@ -4,76 +4,104 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Applicant;
-use App\Models\Client;
+use App\Models\Employee;
 use App\Models\Branch;
 use App\Models\Workflow;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
 
 class DashboardController extends Controller
 {
     public function index(Request $request)
     {
-        // Total counts
-        $totalApplicants    = Applicant::count();
-        $activeApplicants   = Applicant::where('status', 'active')->count();
-        $hiredApplicants    = Applicant::where('status', 'hired')->count();
-        $rejectedApplicants = Applicant::where('status', 'rejected')->count();
+        // ── Stat Cards ────────────────────────────────────────────────────────
 
-        // New applicants today
-        $newToday = Applicant::whereDate('applied_at', today())->count();
+        $hiredEmployees         = Employee::whereNull('employment_status')->count();
+        $inProcess              = Applicant::where('status', 'active')->count();
+        $totalBranches          = Branch::count();
+        $incompleteRequirements = Employee::where('requirements_status', 'incomplete')->count();
 
-        // Applicants by source
+        // ── Hired per Month (last 6 months) ───────────────────────────────────
+
+        $hiredPerMonth = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $month = Carbon::now()->subMonths($i);
+            $count = Employee::whereYear('date_hired',  $month->year)
+                             ->whereMonth('date_hired', $month->month)
+                             ->count();
+            $hiredPerMonth[] = [
+                'month' => $month->format('M'),
+                'year'  => $month->year,
+                'count' => $count,
+            ];
+        }
+
+        // ── Applicants by Source ──────────────────────────────────────────────
+
         $applicantsBySource = Applicant::select('source', DB::raw('count(*) as count'))
+            ->whereNotNull('source')
             ->groupBy('source')
+            ->orderByDesc('count')
             ->get();
 
-        // Applicants by status
-        $applicantsByStatus = Applicant::select('status', DB::raw('count(*) as count'))
-            ->groupBy('status')
-            ->get();
+        // ── Branch Overview ───────────────────────────────────────────────────
 
-        // Recent applicants
-        $recentApplicants = Applicant::with(['branch.client', 'currentStep'])
-            ->orderBy('applied_at', 'desc')
-            ->limit(10)
-            ->get();
-
-        // Branch overview — what the frontend expects
-        $branchOverview = Branch::withCount([
-                'applicants as total_applicants',
-                'applicants as hired_count' => function ($q) {
-                    $q->where('status', 'hired');
-                },
-            ])
+        $branchOverview = Branch::with('client')
             ->get()
             ->map(function ($branch) {
+                $totalEmployees  = Employee::where('branch_id', $branch->id)
+                                           ->whereNull('employment_status')
+                                           ->count();
+                $inProcess       = Applicant::where('branch_id', $branch->id)
+                                            ->where('status', 'active')
+                                            ->count();
+                $incompleteDocs  = Employee::where('branch_id', $branch->id)
+                                           ->where('requirements_status', 'incomplete')
+                                           ->count();
                 return [
-                    'branch_name'      => $branch->branch_name,
-                    'location'         => $branch->location,
-                    'total_employees'  => $branch->hired_count,   // hired = deployed employees
-                    'total_applicants' => $branch->total_applicants,
-                    'pending_docs'     => 0, // Update this when you add document tracking
+                    'branch_name'     => $branch->branch_name,
+                    'client_name'     => $branch->client?->name ?? '—',
+                    'total_employees' => $totalEmployees,
+                    'in_process'      => $inProcess,
+                    'incomplete_docs' => $incompleteDocs,
+                ];
+            });
+
+        // ── Recent Activity (from applicant_activities) ───────────────────────
+
+        $recentActivity = DB::table('applicant_activities')
+            ->join('applicants', 'applicant_activities.applicant_id', '=', 'applicants.id')
+            ->join('users',      'applicant_activities.user_id',      '=', 'users.id')
+            ->select(
+                'applicant_activities.activity_type as type',
+                'applicants.full_name as name',
+                'applicant_activities.description as detail',
+                'applicant_activities.created_at as time'
+            )
+            ->orderByDesc('applicant_activities.created_at')
+            ->limit(5)
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'type'   => $item->type,
+                    'name'   => $item->name,
+                    'detail' => $item->detail,
+                    'time'   => Carbon::parse($item->time)->diffForHumans(),
                 ];
             });
 
         return response()->json([
             'summary' => [
-                'total_applicants'        => $totalApplicants,
-                'active_applicants'       => $activeApplicants,
-                'hired_applicants'        => $hiredApplicants,
-                'rejected_applicants'     => $rejectedApplicants,
-                'total_clients'           => Client::count(),
-                'total_branches'          => Branch::count(),
-                'total_workflows'         => Workflow::count(),
-                'total_employees'         => $hiredApplicants,    // hired = deployed employees
-                'incomplete_requirements' => 0,                   // Update when document tracking is added
-                'new_today'               => $newToday,
+                'hired_employees'         => $hiredEmployees,
+                'in_process'              => $inProcess,
+                'total_branches'          => $totalBranches,
+                'incomplete_requirements' => $incompleteRequirements,
             ],
+            'hired_per_month'      => $hiredPerMonth,
             'applicants_by_source' => $applicantsBySource,
-            'applicants_by_status' => $applicantsByStatus,
-            'recent_applicants'    => $recentApplicants,
-            'branch_overview'      => $branchOverview,            // renamed from top_branches
+            'branch_overview'      => $branchOverview,
+            'recent_activity'      => $recentActivity,
         ]);
     }
 }

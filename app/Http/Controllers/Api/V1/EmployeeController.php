@@ -69,6 +69,11 @@ class EmployeeController extends Controller
             $query->where('requirements_status', $request->requirements_status);
         }
 
+        // TA filter — admin/hr_admin only
+if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
+    $query->where('created_by', $request->ta_id);
+}
+
         // Date hired range filters
         if ($request->filled('date_hired_from')) {
             $query->whereDate('date_hired', '>=', $request->date_hired_from);
@@ -167,7 +172,7 @@ class EmployeeController extends Controller
             'daily_rate'        => $validated['daily_rate'] ?? null,
             'remarks'           => $validated['remarks'] ?? null,
             // No employment_status — NULL means actively employed
-            'created_by'        => auth()->id(),
+            'created_by' => $applicant->created_by,
         ]);
 
         return response()->json([
@@ -403,4 +408,24 @@ class EmployeeController extends Controller
 
         return response()->json(['message' => 'HR action deleted successfully.']);
     }
+
+    public function updateCustomFields(Request $request, Employee $employee)
+{
+    $branchIds = $this->allowedBranchIds();
+    if ($branchIds !== null && !in_array($employee->branch_id, $branchIds)) {
+        return response()->json(['message' => 'Access denied.'], 403);
+    }
+
+    // Merge new values into existing custom_fields (don't wipe other keys)
+    $existing = $employee->custom_fields ?? [];
+    $merged   = array_merge($existing, $request->all());
+
+    $employee->custom_fields = $merged;
+    $employee->save();
+
+    return response()->json([
+        'message'       => 'Custom fields updated.',
+        'custom_fields' => $employee->custom_fields,
+    ]);
+}
 }

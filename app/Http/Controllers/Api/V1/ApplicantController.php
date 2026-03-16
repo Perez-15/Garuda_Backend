@@ -278,20 +278,28 @@ class ApplicantController extends Controller
 
     // ── Destroy ────────────────────────────────────────────────────────────────
 
-    public function destroy(Applicant $applicant)
-    {
-        if (!$this->canModify($applicant)) {
-            return response()->json(['message' => 'You can only delete applicants you added.'], 403);
-        }
-
-        if ($applicant->resume_path) {
-            Storage::disk('public')->delete($applicant->resume_path);
-        }
-
-        $applicant->delete();
-
-        return response()->json(['message' => 'Applicant deleted successfully']);
+public function destroy(Applicant $applicant)
+{
+    if (!$this->canModify($applicant)) {
+        return response()->json(['message' => 'You can only delete applicants you added.'], 403);
     }
+
+    // Also delete the linked employee record if exists
+    if ($applicant->employee) {
+        if ($applicant->employee->profile_photo) {
+            Storage::disk(config('filesystems.default'))->delete($applicant->employee->profile_photo);
+        }
+        $applicant->employee->delete();
+    }
+
+    if ($applicant->resume_path) {
+        Storage::disk('public')->delete($applicant->resume_path);
+    }
+
+    $applicant->delete();
+
+    return response()->json(['message' => 'Applicant and employee record deleted successfully.']);
+}
 
     // ── Move Step ──────────────────────────────────────────────────────────────
 
@@ -404,4 +412,26 @@ class ApplicantController extends Controller
 
         return response()->json($activities);
     }
+
+    public function updateCustomFields(Request $request, Applicant $applicant)
+{
+    if (!$this->canModify($applicant)) {
+        return response()->json(['message' => 'You can only update applicants you added.'], 403);
+    }
+
+    $existing = $applicant->custom_fields ?? [];
+    $applicant->custom_fields = array_merge($existing, $request->all());
+    $applicant->save();
+
+    $applicant->activities()->create([
+        'user_id'       => auth()->id(),
+        'activity_type' => 'updated',
+        'description'   => 'Custom fields updated',
+    ]);
+
+    return response()->json([
+        'message'       => 'Custom fields updated.',
+        'custom_fields' => $applicant->custom_fields,
+    ]);
+}
 }

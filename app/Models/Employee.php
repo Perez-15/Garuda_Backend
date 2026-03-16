@@ -57,6 +57,8 @@ class Employee extends Model
         'source',
         'created_by',
         'remarks',
+
+        'custom_fields', 
     ];
 
     protected $casts = [
@@ -68,6 +70,7 @@ class Employee extends Model
         'police_clearance_expiry' => 'date',
         'medcert_expiry'          => 'date',
         'daily_rate'              => 'decimal:2',
+        'custom_fields'           => 'array',
     ];
 
     // ── Relationships ──────────────────────────────────────────────────────────

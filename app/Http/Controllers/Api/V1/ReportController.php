@@ -8,7 +8,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Barryvdh\DomPDF\Facade\Pdf;
 
-
 class ReportController extends Controller
 {
     // ── Shared date/filter scope ───────────────────────────────────────────────
@@ -112,22 +111,33 @@ class ReportController extends Controller
     }
 
     // ── Top Recruiters ─────────────────────────────────────────────────────────
+    // FIX: Query directly from applicants.created_by + applicants.status
+    // instead of relying on applicant_activities description text matching
+    // which was causing hired count to show 0 after convertFromApplicant()
     public function topRecruiters(Request $request)
     {
-        $query = DB::table('applicant_activities')
-            ->join('users', 'applicant_activities.user_id', '=', 'users.id')
-            ->join('applicants', 'applicant_activities.applicant_id', '=', 'applicants.id')
+        $query = DB::table('users')
+            ->join('applicants', 'applicants.created_by', '=', 'users.id')
             ->select(
                 'users.id',
                 'users.name',
-                DB::raw('COUNT(CASE WHEN applicant_activities.activity_type = "created" THEN 1 END) as total_added'),
-                DB::raw('COUNT(CASE WHEN applicant_activities.activity_type = "status_change" AND applicant_activities.description LIKE "%to \'hired\'%" THEN 1 END) as total_hired'),
-                DB::raw('COUNT(CASE WHEN applicant_activities.activity_type = "step_change" THEN 1 END) as total_steps_moved')
+                // Count all applicants this user created
+                DB::raw('COUNT(DISTINCT applicants.id) as total_added'),
+                // Count hired directly from applicants.status — reliable regardless
+                // of how the conversion happened (convertFromApplicant or manual)
+                DB::raw('COUNT(DISTINCT CASE WHEN applicants.status = "hired" THEN applicants.id END) as total_hired'),
+                // Count step movements from activity log (kept for reference)
+                DB::raw('COUNT(DISTINCT CASE WHEN applicant_activities.activity_type = "step_change" THEN applicant_activities.id END) as total_steps_moved')
             )
+            ->leftJoin('applicant_activities', function ($join) {
+                $join->on('applicant_activities.applicant_id', '=', 'applicants.id')
+                     ->on('applicant_activities.user_id', '=', 'users.id');
+            })
             ->whereNull('applicants.deleted_at');
 
+        // Date filter on when the applicant was created
         if ($request->filled('start_date') && $request->filled('end_date')) {
-            $query->whereBetween('applicant_activities.created_at', [
+            $query->whereBetween('applicants.created_at', [
                 $request->start_date . ' 00:00:00',
                 $request->end_date   . ' 23:59:59',
             ]);
@@ -137,15 +147,16 @@ class ReportController extends Controller
             $query->where('applicants.branch_id', $request->branch_id);
         }
 
+        // Use alias to avoid duplicate join conflict with branches
         if ($request->filled('client_id')) {
-            $query->join('branches', 'applicants.branch_id', '=', 'branches.id')
-                  ->where('branches.client_id', $request->client_id);
+            $query->join('branches as rb', 'applicants.branch_id', '=', 'rb.id')
+                  ->where('rb.client_id', $request->client_id);
         }
 
         $recruiters = $query
             ->groupBy('users.id', 'users.name')
             ->orderByDesc('total_added')
-            ->limit(5)
+            ->limit(10)
             ->get()
             ->map(function ($recruiter) {
                 $recruiter->conversion_rate = $recruiter->total_added > 0
@@ -178,6 +189,7 @@ class ReportController extends Controller
         $hired           = $applicants->where('status', 'hired')->count();
         $active          = $applicants->where('status', 'active')->count();
         $rejected        = $applicants->where('status', 'rejected')->count();
+        $pooling         = $applicants->where('status', 'pooling')->count();
         $conversionRate  = $totalApplicants > 0
             ? round(($hired / $totalApplicants) * 100, 1)
             : 0;
@@ -204,18 +216,19 @@ class ReportController extends Controller
         $byBranch = $byBranch->get();
 
         // 5. Top Recruiters
-        $recruiterQuery = DB::table('applicant_activities')
-            ->join('users', 'applicant_activities.user_id', '=', 'users.id')
-            ->join('applicants', 'applicant_activities.applicant_id', '=', 'applicants.id')
+        // FIX: Same fix as topRecruiters() — use applicants.status directly
+        // instead of activity log text matching to avoid 0 hired count bug
+        $recruiterQuery = DB::table('users')
+            ->join('applicants', 'applicants.created_by', '=', 'users.id')
             ->select(
                 'users.name',
-                DB::raw('COUNT(CASE WHEN applicant_activities.activity_type = "created" THEN 1 END) as total_added'),
-                DB::raw('COUNT(CASE WHEN applicant_activities.activity_type = "status_change" AND applicant_activities.description LIKE "%to \'hired\'%" THEN 1 END) as total_hired')
+                DB::raw('COUNT(DISTINCT applicants.id) as total_added'),
+                DB::raw('COUNT(DISTINCT CASE WHEN applicants.status = "hired" THEN applicants.id END) as total_hired')
             )
             ->whereNull('applicants.deleted_at');
 
         if ($request->filled('start_date') && $request->filled('end_date')) {
-            $recruiterQuery->whereBetween('applicant_activities.created_at', [
+            $recruiterQuery->whereBetween('applicants.created_at', [
                 $request->start_date . ' 00:00:00',
                 $request->end_date   . ' 23:59:59',
             ]);
@@ -225,16 +238,23 @@ class ReportController extends Controller
             $recruiterQuery->where('applicants.branch_id', $request->branch_id);
         }
 
+        // Use alias to avoid duplicate join conflict
         if ($request->filled('client_id')) {
-            $recruiterQuery->join('branches', 'applicants.branch_id', '=', 'branches.id')
-                           ->where('branches.client_id', $request->client_id);
+            $recruiterQuery->join('branches as eb', 'applicants.branch_id', '=', 'eb.id')
+                           ->where('eb.client_id', $request->client_id);
         }
 
         $recruiters = $recruiterQuery
             ->groupBy('users.id', 'users.name')
             ->orderByDesc('total_added')
-            ->limit(5)
-            ->get();
+            ->limit(10)
+            ->get()
+            ->map(function ($recruiter) {
+                $recruiter->conversion_rate = $recruiter->total_added > 0
+                    ? round(($recruiter->total_hired / $recruiter->total_added) * 100, 1)
+                    : 0;
+                return $recruiter;
+            });
 
         // 6. Generate PDF
         $pdf = Pdf::loadView('reports.export', [
@@ -243,6 +263,7 @@ class ReportController extends Controller
             'hired'           => $hired,
             'active'          => $active,
             'rejected'        => $rejected,
+            'pooling'         => $pooling,
             'conversionRate'  => $conversionRate,
             'bySource'        => $bySource,
             'byStatus'        => $byStatus,

@@ -23,10 +23,12 @@ class Applicant extends Model
         'applied_at',
         'status',
         'created_by', 
+        'custom_fields',
     ];
 
     protected $casts = [
         'applied_at' => 'datetime',
+        'custom_fields' => 'array',
     ];
 
     // Relationships
