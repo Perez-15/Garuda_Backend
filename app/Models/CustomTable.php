@@ -4,31 +4,24 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class CustomColumn extends Model
+class CustomTable extends Model
 {
     protected $fillable = [
         'page',
-        'section', 
-        'field_key',
         'label',
-        'type',
-        'options',
-        'order',
-        'scope',       
-        'required',       
-        'is_fixed',  
+        'scope',
         'created_by',
-    ];
-
-    protected $casts = [
-        'options' => 'array',
-        'required'  => 'boolean',  
-        'is_fixed'  => 'boolean', 
     ];
 
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function columns(): HasMany
+    {
+        return $this->hasMany(CustomColumn::class, 'page', 'page');
     }
 }

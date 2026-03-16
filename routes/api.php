@@ -118,11 +118,15 @@ Route::patch('attendance/time-out',[AttendanceController::class, 'timeOut']);
     Route::get('reports/export',               [ReportController::class, 'export']);
     Route::get('reports/top-recruiters',       [ReportController::class, 'topRecruiters']);
 
-    // ── Custom Columns ─────────────────────────────────────────────────────────
-    // IMPORTANT: reorder must be declared BEFORE apiResource
-    // so Laravel doesn't treat it as a {column} wildcard
-    Route::post('/custom-columns/reorder',   [CustomColumnController::class, 'reorder']);
-    Route::apiResource('custom-columns', CustomColumnController::class);
+  // ── Custom Columns ─────────────────────────────────────────────────────────
+// IMPORTANT: tables + reorder must be declared BEFORE apiResource
+// so Laravel doesn't treat them as {column} wildcards
+Route::get   ('custom-columns/tables',        [CustomColumnController::class, 'getTables']);
+Route::post  ('custom-columns/tables',        [CustomColumnController::class, 'storeTable']);
+Route::patch ('custom-columns/tables/{page}', [CustomColumnController::class, 'updateTable']);
+Route::delete('custom-columns/tables/{page}', [CustomColumnController::class, 'destroyTable']);
+Route::post  ('custom-columns/reorder',       [CustomColumnController::class, 'reorder']);
+Route::apiResource('custom-columns', CustomColumnController::class);
 
 
     Route::post('/users/{user}/photo',   [UserController::class, 'uploadPhoto']);
