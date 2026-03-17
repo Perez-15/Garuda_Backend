@@ -28,22 +28,20 @@ class EmployeeController extends Controller
 
     // ── Index ──────────────────────────────────────────────────────────────────
 
-    /**
-     * GET /employees
-     * Supports: status, branch_id, search, sort_by, sort_dir, per_page
-     */
     public function index(Request $request)
     {
-        $query = Employee::with(['branch.client', 'position', 'createdBy']);
+        // 'position' removed from with() — it's now a plain text column
+        $query = Employee::with(['branch.client', 'createdBy']);
 
         $this->scopeToBranches($query);
 
-        // Filter by employment status (hired/resigned/terminated/endo/awol)
-        // 'active' means employment_status IS NULL (no end event recorded yet)
         if ($request->filled('status')) {
             if ($request->status === 'active') {
-                $query->whereNull('employment_status');
-            } else {
+                $query->where(function ($q) {
+                    $q->where('employment_status', 'hired')
+                      ->orWhereNull('employment_status');
+                });
+            } elseif ($request->status !== 's') {
                 $query->where('employment_status', $request->status);
             }
         }
@@ -59,8 +57,8 @@ class EmployeeController extends Controller
         if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
-                $q->where('full_name',      'like', "%{$search}%")
-                  ->orWhere('email',        'like', "%{$search}%")
+                $q->where('full_name',       'like', "%{$search}%")
+                  ->orWhere('email',         'like', "%{$search}%")
                   ->orWhere('contact_number','like', "%{$search}%");
             });
         }
@@ -69,12 +67,10 @@ class EmployeeController extends Controller
             $query->where('requirements_status', $request->requirements_status);
         }
 
-        // TA filter — admin/hr_admin only
-if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
-    $query->where('created_by', $request->ta_id);
-}
+        if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
+            $query->where('created_by', $request->ta_id);
+        }
 
-        // Date hired range filters
         if ($request->filled('date_hired_from')) {
             $query->whereDate('date_hired', '>=', $request->date_hired_from);
         }
@@ -107,23 +103,21 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
             $base->where('branch_id', $request->branch_id);
         }
 
-        $statusCounts = (clone $base)
-            ->selectRaw('employment_status, COUNT(*) as total')
-            ->groupBy('employment_status')
-            ->pluck('total', 'employment_status');
-
         $requirementsCounts = (clone $base)
             ->selectRaw('requirements_status, COUNT(*) as total')
             ->groupBy('requirements_status')
             ->pluck('total', 'requirements_status');
 
         return response()->json([
-            'total'              => (clone $base)->count(),
-            'active'             => (clone $base)->whereNull('employment_status')->count(),
-            'resigned'           => $statusCounts['resigned']   ?? 0,
-            'terminated'         => $statusCounts['terminated'] ?? 0,
-            'endo'               => $statusCounts['endo']       ?? 0,
-            'awol'               => $statusCounts['awol']       ?? 0,
+            's'          => (clone $base)->count(),
+            'active'     => (clone $base)->where(function ($q) {
+                                $q->where('employment_status', 'hired')
+                                  ->orWhereNull('employment_status');
+                            })->count(),
+            'resigned'   => (clone $base)->where('employment_status', 'resigned')->count(),
+            'terminated' => (clone $base)->where('employment_status', 'terminated')->count(),
+            'endo'       => (clone $base)->where('employment_status', 'endo')->count(),
+            'awol'       => (clone $base)->where('employment_status', 'awol')->count(),
             'requirements_complete'   => $requirementsCounts['complete']   ?? 0,
             'requirements_incomplete' => $requirementsCounts['incomplete'] ?? 0,
             'requirements_pending'    => $requirementsCounts['pending']    ?? 0,
@@ -132,11 +126,6 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
 
     // ── Convert Applicant → Employee ───────────────────────────────────────────
 
-    /**
-     * POST /employees/convert/{applicant}
-     * Converts a hired applicant into an Employee record.
-     * Carries over: full_name, email, phone → contact_number, source, branch_id
-     */
     public function convertFromApplicant(Request $request, Applicant $applicant)
     {
         $branchIds = $this->allowedBranchIds();
@@ -144,40 +133,39 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
-        // Prevent duplicate conversion
         if (Employee::where('applicant_id', $applicant->id)->exists()) {
             return response()->json(['message' => 'This applicant has already been converted to an employee.'], 409);
         }
 
         $validated = $request->validate([
-            'position_id'  => 'nullable|exists:positions,id',
-            'date_hired'   => 'required|date',
-            'daily_rate'   => 'nullable|numeric|min:0',
-            'remarks'      => 'nullable|string',
+            'position'   => 'nullable|string|max:255',
+            'date_hired' => 'required|date',
+            'daily_rate' => 'nullable|numeric|min:0',
+            'remarks'    => 'nullable|string',
         ]);
 
-        // Mark applicant as hired
         $applicant->status = 'hired';
         $applicant->save();
 
         $employee = Employee::create([
-            'applicant_id'   => $applicant->id,
-            'branch_id'      => $applicant->branch_id,
-            'position_id'    => $validated['position_id'] ?? null,
-            'full_name'      => $applicant->full_name,
-            'email'          => $applicant->email,
-            'contact_number' => $applicant->phone,
-            'source'         => $applicant->source,
+            'applicant_id'      => $applicant->id,
+            'branch_id'         => $applicant->branch_id,
+            'position'          => $validated['position'] ?? null,
+            'full_name'         => $applicant->full_name,
+            'email'             => $applicant->email,
+            'contact_number'    => $applicant->phone,
+            'source'            => $applicant->source,
             'date_hired'        => $validated['date_hired'],
             'daily_rate'        => $validated['daily_rate'] ?? null,
             'remarks'           => $validated['remarks'] ?? null,
-            // No employment_status — NULL means actively employed
-            'created_by' => $applicant->created_by,
+            'employment_status' => 'hired',
+            'created_by'        => $applicant->created_by,
         ]);
 
+        // 'position' removed from load() — plain text column, no relationship
         return response()->json([
             'message'  => 'Applicant successfully converted to employee.',
-            'employee' => $employee->load(['branch.client', 'position', 'applicant']),
+            'employee' => $employee->load(['branch.client', 'applicant']),
         ], 201);
     }
 
@@ -187,7 +175,7 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
     {
         $validated = $request->validate([
             'branch_id'                  => 'required|exists:branches,id',
-            'position_id'                => 'nullable|exists:positions,id',
+            'position'                   => 'nullable|string|max:255',
             'full_name'                  => 'required|string|max:255',
             'date_of_birth'              => 'nullable|date',
             'gender'                     => 'nullable|in:Male,Female',
@@ -207,9 +195,19 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
             'police_clearance_expiry'    => 'nullable|date',
             'medcert_status'             => 'nullable|in:submitted,pending,not_required',
             'medcert_expiry'             => 'nullable|date',
+            'psa_status'                 => 'nullable|in:submitted,pending,not_required',
+            'sss_document_status'        => 'nullable|in:submitted,pending,not_required',
+            'philhealth_document_status' => 'nullable|in:submitted,pending,not_required',
+            'pagibig_document_status'    => 'nullable|in:submitted,pending,not_required',
+            'tin_document_status'        => 'nullable|in:submitted,pending,not_required',
+            'coe_status'                 => 'nullable|in:submitted,pending,not_required',
+            'tor_diploma_status'         => 'nullable|in:submitted,pending,not_required',
+            'valid_id_status'            => 'nullable|in:submitted,pending,not_required',
+            'picture_1x1_status'         => 'nullable|in:submitted,pending,not_required',
             'requirements_status'        => 'nullable|in:complete,incomplete,pending',
             'date_hired'                 => 'required|date',
             'daily_rate'                 => 'nullable|numeric|min:0',
+            'source'                     => 'nullable|string|max:100',
             'remarks'                    => 'nullable|string',
         ]);
 
@@ -218,14 +216,15 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
             return response()->json(['message' => 'You are not assigned to this branch.'], 403);
         }
 
-        // No employment_status on create — NULL means actively employed
-        $validated['created_by'] = auth()->id();
+        $validated['employment_status'] = 'hired';
+        $validated['created_by']        = auth()->id();
 
         $employee = Employee::create($validated);
 
+        // 'position' removed from load() — plain text column, no relationship
         return response()->json([
             'message'  => 'Employee created successfully.',
-            'employee' => $employee->load(['branch.client', 'position']),
+            'employee' => $employee->load(['branch.client']),
         ], 201);
     }
 
@@ -238,10 +237,10 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
+        // 'position' removed from load() — plain text column, no relationship
         return response()->json([
             'employee' => $employee->load([
                 'branch.client',
-                'position',
                 'applicant',
                 'hrActions.createdBy',
                 'createdBy',
@@ -259,7 +258,8 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
         }
 
         $validated = $request->validate([
-            'position_id'                => 'nullable|exists:positions,id',
+            'branch_id'                  => 'sometimes|exists:branches,id',
+            'position'                   => 'sometimes|nullable|string|max:255',
             'full_name'                  => 'sometimes|string|max:255',
             'date_of_birth'              => 'nullable|date',
             'gender'                     => 'nullable|in:Male,Female',
@@ -279,29 +279,35 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
             'police_clearance_expiry'    => 'nullable|date',
             'medcert_status'             => 'nullable|in:submitted,pending,not_required',
             'medcert_expiry'             => 'nullable|date',
+            'psa_status'                 => 'nullable|in:submitted,pending,not_required',
+            'sss_document_status'        => 'nullable|in:submitted,pending,not_required',
+            'philhealth_document_status' => 'nullable|in:submitted,pending,not_required',
+            'pagibig_document_status'    => 'nullable|in:submitted,pending,not_required',
+            'tin_document_status'        => 'nullable|in:submitted,pending,not_required',
+            'coe_status'                 => 'nullable|in:submitted,pending,not_required',
+            'tor_diploma_status'         => 'nullable|in:submitted,pending,not_required',
+            'valid_id_status'            => 'nullable|in:submitted,pending,not_required',
+            'picture_1x1_status'         => 'nullable|in:submitted,pending,not_required',
             'requirements_status'        => 'nullable|in:complete,incomplete,pending',
             'date_hired'                 => 'sometimes|date',
             'date_resigned'              => 'nullable|date',
             'date_ended'                 => 'nullable|date',
             'daily_rate'                 => 'nullable|numeric|min:0',
-            'employment_status'          => 'nullable|in:resigned,terminated,endo,awol',
+            'source'                     => 'nullable|string|max:100',
             'remarks'                    => 'nullable|string',
         ]);
 
         $employee->update($validated);
 
+        // 'position' removed from load() — plain text column, no relationship
         return response()->json([
             'message'  => 'Employee updated successfully.',
-            'employee' => $employee->load(['branch.client', 'position', 'hrActions.createdBy']),
+            'employee' => $employee->load(['branch.client', 'hrActions.createdBy']),
         ]);
     }
 
     // ── Update Employment Status ───────────────────────────────────────────────
 
-    /**
-     * PATCH /employees/{employee}/status
-     * Changes employment_status and sets the relevant end date automatically.
-     */
     public function updateStatus(Request $request, Employee $employee)
     {
         $branchIds = $this->allowedBranchIds();
@@ -310,7 +316,7 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
         }
 
         $request->validate([
-            'employment_status' => 'required|in:resigned,terminated,endo,awol',
+            'employment_status' => 'required|in:hired,resigned,terminated,endo,awol',
             'effective_date'    => 'nullable|date',
         ]);
 
@@ -319,7 +325,6 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
 
         $employee->employment_status = $status;
 
-        // Set the appropriate end-date field
         if ($status === 'resigned') {
             $employee->date_resigned = $effectiveDate;
         } elseif (in_array($status, ['terminated', 'endo', 'awol'])) {
@@ -350,9 +355,6 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
 
     // ── HR Actions ─────────────────────────────────────────────────────────────
 
-    /**
-     * GET /employees/{employee}/hr-actions
-     */
     public function hrActions(Employee $employee)
     {
         $branchIds = $this->allowedBranchIds();
@@ -365,9 +367,6 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
         );
     }
 
-    /**
-     * POST /employees/{employee}/hr-actions
-     */
     public function addHrAction(Request $request, Employee $employee)
     {
         $branchIds = $this->allowedBranchIds();
@@ -395,9 +394,29 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
         ], 201);
     }
 
-    /**
-     * DELETE /employees/{employee}/hr-actions/{action}
-     */
+    public function updateHrAction(Request $request, Employee $employee, EmployeeHrAction $action)
+    {
+        if ($action->employee_id !== $employee->id) {
+            return response()->json(['message' => 'Action does not belong to this employee.'], 403);
+        }
+
+        $validated = $request->validate([
+            'type'        => 'sometimes|in:memo,ir,loa',
+            'subject'     => 'nullable|string|max:255',
+            'description' => 'nullable|string',
+            'action_date' => 'sometimes|date',
+            'loa_start'   => 'nullable|date',
+            'loa_end'     => 'nullable|date|after_or_equal:loa_start',
+        ]);
+
+        $action->update($validated);
+
+        return response()->json([
+            'message' => 'HR action updated successfully.',
+            'action'  => $action->load('createdBy'),
+        ]);
+    }
+
     public function deleteHrAction(Employee $employee, EmployeeHrAction $action)
     {
         if ($action->employee_id !== $employee->id) {
@@ -409,23 +428,22 @@ if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_adm
         return response()->json(['message' => 'HR action deleted successfully.']);
     }
 
+    // ── Custom Fields ─────────────────────────────────────────────────────────
+
     public function updateCustomFields(Request $request, Employee $employee)
-{
-    $branchIds = $this->allowedBranchIds();
-    if ($branchIds !== null && !in_array($employee->branch_id, $branchIds)) {
-        return response()->json(['message' => 'Access denied.'], 403);
+    {
+        $branchIds = $this->allowedBranchIds();
+        if ($branchIds !== null && !in_array($employee->branch_id, $branchIds)) {
+            return response()->json(['message' => 'Access denied.'], 403);
+        }
+
+        $existing = $employee->custom_fields ?? [];
+        $employee->custom_fields = array_merge($existing, $request->all());
+        $employee->save();
+
+        return response()->json([
+            'message'       => 'Custom fields updated.',
+            'custom_fields' => $employee->custom_fields,
+        ]);
     }
-
-    // Merge new values into existing custom_fields (don't wipe other keys)
-    $existing = $employee->custom_fields ?? [];
-    $merged   = array_merge($existing, $request->all());
-
-    $employee->custom_fields = $merged;
-    $employee->save();
-
-    return response()->json([
-        'message'       => 'Custom fields updated.',
-        'custom_fields' => $employee->custom_fields,
-    ]);
-}
 }

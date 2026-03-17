@@ -93,7 +93,7 @@ Route::patch('attendance/time-out',[AttendanceController::class, 'timeOut']);
     Route::get('employees/{employee}/hr-actions',              [EmployeeController::class, 'hrActions']);
     Route::post('employees/{employee}/hr-actions',             [EmployeeController::class, 'addHrAction']);
     Route::delete('employees/{employee}/hr-actions/{action}',  [EmployeeController::class, 'deleteHrAction']);
-
+    Route::patch('employees/{employee}/hr-actions/{action}', [EmployeeController::class, 'updateHrAction']);
     // ── Clients ────────────────────────────────────────────────────────────────
     Route::apiResource('clients', ClientController::class);
 

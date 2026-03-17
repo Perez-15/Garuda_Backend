@@ -13,7 +13,7 @@ class Employee extends Model
     protected $fillable = [
         'applicant_id',
         'branch_id',
-        'position_id',
+        'position',
 
         // Personal
         'full_name',
@@ -35,13 +35,24 @@ class Employee extends Model
         'philhealth',
         'tin',
 
-        // Documents
+        // Documents — pre-existing
         'nbi_status',
         'nbi_expiry',
         'police_clearance_status',
         'police_clearance_expiry',
         'medcert_status',
         'medcert_expiry',
+
+        // Documents — new (added by migration)
+        'psa_status',
+        'sss_document_status',
+        'philhealth_document_status',
+        'pagibig_document_status',
+        'tin_document_status',
+        'coe_status',
+        'tor_diploma_status',
+        'valid_id_status',
+        'picture_1x1_status',
 
         // 201 Status
         'requirements_status',
@@ -57,8 +68,7 @@ class Employee extends Model
         'source',
         'created_by',
         'remarks',
-
-        'custom_fields', 
+        'custom_fields',
     ];
 
     protected $casts = [
@@ -77,7 +87,7 @@ class Employee extends Model
 
     public function applicant()
     {
-        return $this->belongsTo(Applicant::class);
+        return $this->belongsTo(\App\Models\Applicant::class);
     }
 
     public function branch()
@@ -105,6 +115,15 @@ class Employee extends Model
     public function scopeByStatus($query, string $status)
     {
         return $query->where('employment_status', $status);
+    }
+
+    public function scopeActive($query)
+    {
+        // active = hired OR null (covers old records before migration)
+        return $query->where(function ($q) {
+            $q->where('employment_status', 'hired')
+              ->orWhereNull('employment_status');
+        });
     }
 
     public function scopeHired($query)
