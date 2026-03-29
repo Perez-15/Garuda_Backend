@@ -30,12 +30,25 @@ class DashboardController extends Controller
             $count = Employee::whereYear('date_hired',  $month->year)
                              ->whereMonth('date_hired', $month->month)
                              ->count();
+
             $hiredPerMonth[] = [
                 'month' => $month->format('M'),
                 'year'  => $month->year,
                 'count' => $count,
             ];
         }
+
+        // ── Hired per Week (last 8 weeks) ─────────────────────────────────────
+
+        $hiredPerWeek = collect(range(7, 0))->map(function ($weeksAgo) {
+            $start = Carbon::now()->startOfWeek()->subWeeks($weeksAgo);
+            $end   = (clone $start)->endOfWeek();
+
+            return [
+                'week'  => 'W' . $start->format('W'), // or use $start->format('M d')
+                'count' => Employee::whereBetween('date_hired', [$start, $end])->count(),
+            ];
+        })->values();
 
         // ── Applicants by Source ──────────────────────────────────────────────
 
@@ -53,12 +66,15 @@ class DashboardController extends Controller
                 $totalEmployees  = Employee::where('branch_id', $branch->id)
                                            ->whereNull('employment_status')
                                            ->count();
+
                 $inProcess       = Applicant::where('branch_id', $branch->id)
                                             ->where('status', 'active')
                                             ->count();
+
                 $incompleteDocs  = Employee::where('branch_id', $branch->id)
                                            ->where('requirements_status', 'incomplete')
                                            ->count();
+
                 return [
                     'branch_name'     => $branch->branch_name,
                     'client_name'     => $branch->client?->name ?? '—',
@@ -68,7 +84,7 @@ class DashboardController extends Controller
                 ];
             });
 
-        // ── Recent Activity (from applicant_activities) ───────────────────────
+        // ── Recent Activity ───────────────────────────────────────────────────
 
         $recentActivity = DB::table('applicant_activities')
             ->join('applicants', 'applicant_activities.applicant_id', '=', 'applicants.id')
@@ -91,6 +107,8 @@ class DashboardController extends Controller
                 ];
             });
 
+        // ── Response ─────────────────────────────────────────────────────────
+
         return response()->json([
             'summary' => [
                 'hired_employees'         => $hiredEmployees,
@@ -99,6 +117,7 @@ class DashboardController extends Controller
                 'incomplete_requirements' => $incompleteRequirements,
             ],
             'hired_per_month'      => $hiredPerMonth,
+            'hired_per_week'       => $hiredPerWeek, // ✅ ADDED
             'applicants_by_source' => $applicantsBySource,
             'branch_overview'      => $branchOverview,
             'recent_activity'      => $recentActivity,

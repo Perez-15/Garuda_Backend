@@ -52,7 +52,7 @@ class Attendance extends Model
      */
     public static function resolveStatus(string $timeIn): string
     {
-        $cutoff = config('attendance.late_cutoff', '09:00:00');
+        $cutoff = config('attendance.late_cutoff', '08:15:00');
 
         return $timeIn <= $cutoff ? 'Present' : 'Late';
     }

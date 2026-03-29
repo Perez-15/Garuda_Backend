@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Attendance;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use App\Models\User;
+
 
 class AttendanceController extends Controller
 {
@@ -170,9 +172,7 @@ class AttendanceController extends Controller
 if ($request->filled('date_to')) {
     $query->whereDate('date', '<=', $request->date_to);
 }
-if ($request->filled('status')) {
-    $query->where('status', $request->status);
-}
+
         $perPage = in_array((int) $request->get('per_page'), [15, 30, 50])
             ? (int) $request->get('per_page') : 15;
 
@@ -185,65 +185,89 @@ if ($request->filled('status')) {
      * Returns today's attendance summary for all eligible employees.
      * Only accessible by HR Admin and Super Admin.
      */
-    public function team(Request $request)
+public function team(Request $request)
 {
     if (!auth()->user()->hasRole(['super_admin', 'hr_admin', 'accounting'])) {
         abort(403, 'Unauthorized.');
     }
 
-    $request->validate([
-        'date'      => 'nullable|date',
-        'date_from' => 'nullable|date',
-        'date_to'   => 'nullable|date',
-        'month'     => 'nullable|date_format:Y-m',
-        'status'    => 'nullable|in:Present,Late,Absent',
-        'role'      => 'nullable|string',
-        'user_id'   => 'nullable|integer|exists:users,id',
-        'per_page'  => 'nullable|integer|in:15,30,50,200',
-    ]);
+    // ✅ Get all employees
+    $users = User::with(['roles'])
+    ->where('is_active', true)
+    ->whereHas('roles', function ($q) {
+        $q->whereIn('name', self::ALLOWED_ROLES);
+    });
 
-    $query = Attendance::with(['user:id,name,email', 'user.roles:id,name'])
-                       ->whereHas('user', function ($q) {
-                           $q->whereHas('roles', function ($r) {
-                               $r->whereIn('name', self::ALLOWED_ROLES);
-                           });
-                       });
-
-    // ── Date range ────────────────────────────────────────────────────────
-    if ($request->filled('date_from') && $request->filled('date_to')) {
-        $query->whereBetween('date', [$request->date_from, $request->date_to]);
-    } elseif ($request->filled('month')) {
-        [$year, $month] = explode('-', $request->month);
-        $query->whereYear('date', $year)->whereMonth('date', $month);
-    } else {
-        // Default to single date (today if not provided)
-        $date = $request->filled('date')
-            ? $request->date
-            : Carbon::now('Asia/Manila')->toDateString();
-        $query->whereDate('date', $date);
-    }
-
-    // ── Filters ───────────────────────────────────────────────────────────
-    if ($request->filled('status')) {
-        $query->where('status', $request->status);
-    }
-
-    if ($request->filled('role')) {
-        $query->whereHas('user.roles', function ($q) use ($request) {
-            $q->where('name', $request->role);
-        });
-    }
-
-    if ($request->filled('user_id')) {
-        $query->where('user_id', $request->user_id);
-    }
-
-    $perPage = in_array((int) $request->get('per_page'), [15, 30, 50, 200])
-        ? (int) $request->get('per_page') : 50;
-
-    return response()->json($query->orderBy('date', 'desc')->paginate($perPage));
+// ✅ ADD THIS
+if ($request->filled('user_id')) {
+    $users->where('id', $request->user_id);
 }
 
+$users = $users->get();
+
+    // ✅ Determine date range
+    $start = $request->filled('date_from')
+        ? Carbon::parse($request->date_from)
+        : ($request->filled('date')
+            ? Carbon::parse($request->date)
+            : Carbon::now('Asia/Manila'));
+
+    $end = $request->filled('date_to')
+        ? Carbon::parse($request->date_to)
+        : $start;
+
+    // ✅ Get all dates in range
+    $dates = [];
+    for ($date = $start->copy(); $date->lte($end); $date->addDay()) {
+        $dates[] = $date->toDateString();
+    }
+
+    // ✅ Get attendance in range
+    $attendance = Attendance::whereBetween('date', [$start, $end])
+        ->get()
+        ->groupBy(function ($item) {
+            return $item->user_id . '_' . $item->date;
+        });
+
+    // ✅ Build FULL matrix
+    $result = collect();
+
+    foreach ($users as $user) {
+        foreach ($dates as $date) {
+
+            $key = $user->id . '_' . $date;
+            $record = $attendance[$key][0] ?? null;
+
+            $result->push([
+                'user' => $user,
+                'date' => $date,
+                'time_in' => $record->time_in ?? null,
+                'time_out' => $record->time_out ?? null,
+                'status' => $record->status ?? 'Absent',
+            ]);
+        }
+    }
+
+    // ✅ Filter by status
+    if ($request->filled('status')) {
+        $result = $result->filter(function ($item) use ($request) {
+            return $item['status'] === $request->status;
+        })->values();
+    }
+
+    // ✅ Pagination
+    $page = $request->get('page', 1);
+    $perPage = $request->get('per_page', 15);
+
+    $paginated = $result->slice(($page - 1) * $perPage, $perPage)->values();
+
+    return response()->json([
+        'data' => $paginated,
+        'total' => $result->count(),
+        'current_page' => (int) $page,
+        'per_page' => (int) $perPage,
+    ]);
+}
     // ── Private Helpers ────────────────────────────────────────────────────────
 
     /**

@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Applicant;
 use App\Models\ApplicantNote;
+use App\Models\Employee;
 use App\Models\Workflow;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class ApplicantController extends Controller
@@ -114,8 +116,6 @@ class ApplicantController extends Controller
             });
         }
 
-        // scope=own — used by InProcessPage for TA users so they only see
-        // applicants they personally added.
         if ($request->get('scope') === 'own') {
             $query->where('created_by', auth()->id());
         }
@@ -127,7 +127,6 @@ class ApplicantController extends Controller
     }
 
     // ── Index ──────────────────────────────────────────────────────────────────
-    // No branch scoping — all roles see all applicants.
 
     public function index(Request $request)
     {
@@ -154,17 +153,49 @@ class ApplicantController extends Controller
     public function stats(Request $request)
     {
         $base = Applicant::query();
-
         $this->applyCommonFilters($base, $request);
 
+        // Employee base — mirrors the same filters as the applicant base
+        $employeeBase = Employee::query();
+
+        if ($request->filled('branch_id')) {
+            $employeeBase->where('branch_id', $request->branch_id);
+        }
+        if ($request->filled('ta_id') && auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
+            $employeeBase->where('created_by', $request->ta_id);
+        }
+        if ($request->filled('period') && auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
+            switch ($request->period) {
+                case 'today':
+                    $employeeBase->whereDate('date_hired', today());
+                    break;
+                case 'this_week':
+                    $employeeBase->whereBetween('date_hired', [now()->startOfWeek(), now()->endOfWeek()]);
+                    break;
+                case 'this_month':
+                    $employeeBase->whereMonth('date_hired', now()->month)
+                                 ->whereYear('date_hired', now()->year);
+                    break;
+                case 'this_year':
+                    $employeeBase->whereYear('date_hired', now()->year);
+                    break;
+            }
+        }
+
         return response()->json([
-            'in_process' => (clone $base)->where('status', 'active')->count(),
-            'hired'      => (clone $base)->where('status', 'hired')->count(),
-            'pooling'    => (clone $base)->where('status', 'pooling')->count(),
-            'this_month' => (clone $base)
-                                ->whereMonth('applied_at', now()->month)
-                                ->whereYear('applied_at',  now()->year)
-                                ->count(),
+            'in_process'       => (clone $base)->where('status', 'active')->count(),
+            'hired'            => (clone $employeeBase)->count(),
+            'active_employees' => (clone $employeeBase)->where(function ($q) {
+                                      $q->where('employment_status', 'hired')
+                                        ->orWhereNull('employment_status');
+                                  })->count(),
+            'pooling'          => (clone $base)->where('status', 'pooling')->count(),
+            // ── Back outs — applicants who withdrew themselves ─────────────
+            'backout'          => (clone $base)->where('status', 'backout')->count(),
+            'this_month'       => (clone $base)
+                                      ->whereMonth('applied_at', now()->month)
+                                      ->whereYear('applied_at',  now()->year)
+                                      ->count(),
         ]);
     }
 
@@ -221,7 +252,6 @@ class ApplicantController extends Controller
     }
 
     // ── Show ───────────────────────────────────────────────────────────────────
-    // Anyone can view any applicant — no access restrictions on read.
 
     public function show(Applicant $applicant)
     {
@@ -276,30 +306,119 @@ class ApplicantController extends Controller
         ]);
     }
 
-    // ── Destroy ────────────────────────────────────────────────────────────────
+    // ── Destroy (soft delete) ──────────────────────────────────────────────────
 
-public function destroy(Applicant $applicant)
-{
-    if (!$this->canModify($applicant)) {
-        return response()->json(['message' => 'You can only delete applicants you added.'], 403);
-    }
-
-    // Also delete the linked employee record if exists
-    if ($applicant->employee) {
-        if ($applicant->employee->profile_photo) {
-            Storage::disk(config('filesystems.default'))->delete($applicant->employee->profile_photo);
+    public function destroy(Applicant $applicant)
+    {
+        if (!$this->canModify($applicant)) {
+            return response()->json(['message' => 'You can only delete applicants you added.'], 403);
         }
-        $applicant->employee->delete();
+
+        DB::transaction(function () use ($applicant) {
+            if ($applicant->employee) {
+                $applicant->employee->delete();
+            }
+
+            if ($applicant->resume_path) {
+                Storage::disk('public')->delete($applicant->resume_path);
+            }
+
+            $applicant->delete();
+        });
+
+        return response()->json(['message' => 'Applicant (and linked employee record) moved to trash.']);
     }
 
-    if ($applicant->resume_path) {
-        Storage::disk('public')->delete($applicant->resume_path);
+    // ── Trashed (recently deleted) ─────────────────────────────────────────────
+
+    public function trashed(Request $request)
+    {
+        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
+        $query = Applicant::onlyTrashed()
+            ->with(['branch.client', 'createdBy', 'employee' => function ($q) {
+                $q->withTrashed();
+            }]);
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('full_name', 'like', "%{$search}%")
+                  ->orWhere('email',   'like', "%{$search}%")
+                  ->orWhere('phone',   'like', "%{$search}%");
+            });
+        }
+
+        $query->orderBy('deleted_at', 'desc');
+
+        $perPage = in_array((int) $request->get('per_page'), [15, 30, 50])
+                    ? (int) $request->get('per_page') : 15;
+
+        return response()->json($query->paginate($perPage));
     }
 
-    $applicant->delete();
+    // ── Restore ────────────────────────────────────────────────────────────────
 
-    return response()->json(['message' => 'Applicant and employee record deleted successfully.']);
-}
+    public function restore(int $id)
+    {
+        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
+        $applicant = Applicant::onlyTrashed()->findOrFail($id);
+
+        DB::transaction(function () use ($applicant) {
+            $applicant->restore();
+
+            $linkedEmployee = Employee::withTrashed()
+                ->where('applicant_id', $applicant->id)
+                ->whereNotNull('deleted_at')
+                ->first();
+
+            if ($linkedEmployee) {
+                $linkedEmployee->restore();
+            }
+        });
+
+        return response()->json([
+            'message'   => 'Applicant restored successfully.',
+            'applicant' => $applicant->load(['branch.client', 'createdBy', 'employee']),
+        ]);
+    }
+
+    // ── Force Delete (permanent) ───────────────────────────────────────────────
+
+    public function forceDelete(int $id)
+    {
+        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
+        $applicant = Applicant::onlyTrashed()->findOrFail($id);
+
+        DB::transaction(function () use ($applicant) {
+            $linkedEmployee = Employee::withTrashed()
+                ->where('applicant_id', $applicant->id)
+                ->first();
+
+            if ($linkedEmployee) {
+                if ($linkedEmployee->profile_photo) {
+                    Storage::disk(config('filesystems.default'))->delete($linkedEmployee->profile_photo);
+                }
+                $linkedEmployee->forceDelete();
+            }
+
+            if ($applicant->resume_path) {
+                Storage::disk('public')->delete($applicant->resume_path);
+            }
+
+            $applicant->forceDelete();
+        });
+
+        return response()->json(['message' => 'Applicant permanently deleted.']);
+    }
 
     // ── Move Step ──────────────────────────────────────────────────────────────
 
@@ -353,7 +472,8 @@ public function destroy(Applicant $applicant)
         }
 
         $request->validate([
-            'status' => 'required|in:active,pooling',
+            // ── backout added — applicant withdrew themselves ──────────────
+            'status' => 'required|in:active,pooling,backout',
         ]);
 
         $oldStatus         = $applicant->status;
@@ -401,7 +521,6 @@ public function destroy(Applicant $applicant)
     }
 
     // ── Activities ─────────────────────────────────────────────────────────────
-    // Anyone can view activity history.
 
     public function activities(Applicant $applicant)
     {
@@ -413,25 +532,27 @@ public function destroy(Applicant $applicant)
         return response()->json($activities);
     }
 
+    // ── Update Custom Fields ───────────────────────────────────────────────────
+
     public function updateCustomFields(Request $request, Applicant $applicant)
-{
-    if (!$this->canModify($applicant)) {
-        return response()->json(['message' => 'You can only update applicants you added.'], 403);
+    {
+        if (!$this->canModify($applicant)) {
+            return response()->json(['message' => 'You can only update applicants you added.'], 403);
+        }
+
+        $existing = $applicant->custom_fields ?? [];
+        $applicant->custom_fields = array_merge($existing, $request->all());
+        $applicant->save();
+
+        $applicant->activities()->create([
+            'user_id'       => auth()->id(),
+            'activity_type' => 'updated',
+            'description'   => 'Custom fields updated',
+        ]);
+
+        return response()->json([
+            'message'       => 'Custom fields updated.',
+            'custom_fields' => $applicant->custom_fields,
+        ]);
     }
-
-    $existing = $applicant->custom_fields ?? [];
-    $applicant->custom_fields = array_merge($existing, $request->all());
-    $applicant->save();
-
-    $applicant->activities()->create([
-        'user_id'       => auth()->id(),
-        'activity_type' => 'updated',
-        'description'   => 'Custom fields updated',
-    ]);
-
-    return response()->json([
-        'message'       => 'Custom fields updated.',
-        'custom_fields' => $applicant->custom_fields,
-    ]);
-}
 }

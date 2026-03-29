@@ -7,6 +7,9 @@ use App\Models\Applicant;
 use App\Models\Employee;
 use App\Models\EmployeeHrAction;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class EmployeeController extends Controller
 {
@@ -30,7 +33,6 @@ class EmployeeController extends Controller
 
     public function index(Request $request)
     {
-        // 'position' removed from with() — it's now a plain text column
         $query = Employee::with(['branch.client', 'createdBy']);
 
         $this->scopeToBranches($query);
@@ -41,9 +43,9 @@ class EmployeeController extends Controller
                     $q->where('employment_status', 'hired')
                       ->orWhereNull('employment_status');
                 });
-            } elseif ($request->status !== 's') {
-                $query->where('employment_status', $request->status);
-            }
+            } elseif ($request->status !== 'all') {
+    $query->where('employment_status', $request->status);
+}
         }
 
         if ($request->filled('branch_id')) {
@@ -76,6 +78,25 @@ class EmployeeController extends Controller
         }
         if ($request->filled('date_hired_to')) {
             $query->whereDate('date_hired', '<=', $request->date_hired_to);
+        }
+
+        // Period shorthand — admin only
+        if ($request->filled('period') && auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
+            switch ($request->period) {
+                case 'today':
+                    $query->whereDate('date_hired', today());
+                    break;
+                case 'this_week':
+                    $query->whereBetween('date_hired', [now()->startOfWeek(), now()->endOfWeek()]);
+                    break;
+                case 'this_month':
+                    $query->whereMonth('date_hired', now()->month)
+                          ->whereYear('date_hired', now()->year);
+                    break;
+                case 'this_year':
+                    $query->whereYear('date_hired', now()->year);
+                    break;
+            }
         }
 
         $allowedSortColumns = ['full_name', 'date_hired', 'date_resigned', 'daily_rate', 'employment_status'];
@@ -125,6 +146,8 @@ class EmployeeController extends Controller
     }
 
     // ── Convert Applicant → Employee ───────────────────────────────────────────
+    // Wrapped in a DB transaction so a failed employee insert
+    // never leaves the applicant stuck in 'hired' status with no employee record.
 
     public function convertFromApplicant(Request $request, Applicant $applicant)
     {
@@ -144,25 +167,29 @@ class EmployeeController extends Controller
             'remarks'    => 'nullable|string',
         ]);
 
-        $applicant->status = 'hired';
-        $applicant->save();
+        $employee = DB::transaction(function () use ($applicant, $validated) {
+            // Step 1: mark applicant as hired
+            $applicant->status = 'hired';
+            $applicant->save();
 
-        $employee = Employee::create([
-            'applicant_id'      => $applicant->id,
-            'branch_id'         => $applicant->branch_id,
-            'position'          => $validated['position'] ?? null,
-            'full_name'         => $applicant->full_name,
-            'email'             => $applicant->email,
-            'contact_number'    => $applicant->phone,
-            'source'            => $applicant->source,
-            'date_hired'        => $validated['date_hired'],
-            'daily_rate'        => $validated['daily_rate'] ?? null,
-            'remarks'           => $validated['remarks'] ?? null,
-            'employment_status' => 'hired',
-            'created_by'        => $applicant->created_by,
-        ]);
+            // Step 2: create employee record
+            // If this fails, the transaction rolls back step 1 automatically
+            return Employee::create([
+                'applicant_id'      => $applicant->id,
+                'branch_id'         => $applicant->branch_id,
+                'position'          => $validated['position'] ?? null,
+                'full_name'         => $applicant->full_name,
+                'email'             => $applicant->email,
+                'contact_number'    => $applicant->phone,
+                'source'            => $applicant->source,
+                'date_hired'        => $validated['date_hired'],
+                'daily_rate'        => $validated['daily_rate'] ?? null,
+                'remarks'           => $validated['remarks'] ?? null,
+                'employment_status' => 'hired',
+                'created_by'        => $applicant->created_by,
+            ]);
+        });
 
-        // 'position' removed from load() — plain text column, no relationship
         return response()->json([
             'message'  => 'Applicant successfully converted to employee.',
             'employee' => $employee->load(['branch.client', 'applicant']),
@@ -221,7 +248,6 @@ class EmployeeController extends Controller
 
         $employee = Employee::create($validated);
 
-        // 'position' removed from load() — plain text column, no relationship
         return response()->json([
             'message'  => 'Employee created successfully.',
             'employee' => $employee->load(['branch.client']),
@@ -230,23 +256,24 @@ class EmployeeController extends Controller
 
     // ── Show ───────────────────────────────────────────────────────────────────
 
-    public function show(Employee $employee)
-    {
-        $branchIds = $this->allowedBranchIds();
-        if ($branchIds !== null && !in_array($employee->branch_id, $branchIds)) {
-            return response()->json(['message' => 'Access denied.'], 403);
-        }
-
-        // 'position' removed from load() — plain text column, no relationship
-        return response()->json([
-            'employee' => $employee->load([
-                'branch.client',
-                'applicant',
-                'hrActions.createdBy',
-                'createdBy',
-            ]),
-        ]);
+ public function show(Employee $employee)
+{
+    $branchIds = $this->allowedBranchIds();
+    if ($branchIds !== null && !in_array($employee->branch_id, $branchIds)) {
+        return response()->json(['message' => 'Access denied.'], 403);
     }
+
+    $employee->load(['branch.client', 'applicant', 'hrActions.createdBy', 'createdBy']);
+
+    // Append public file_url to each HR action so frontend can preview directly
+    $employee->hrActions->each(function ($action) {
+        $action->file_url = $action->file_path
+            ? Storage::disk('public')->url($action->file_path)
+            : null;
+    });
+
+    return response()->json(['employee' => $employee]);
+}
 
     // ── Update ─────────────────────────────────────────────────────────────────
 
@@ -299,7 +326,6 @@ class EmployeeController extends Controller
 
         $employee->update($validated);
 
-        // 'position' removed from load() — plain text column, no relationship
         return response()->json([
             'message'  => 'Employee updated successfully.',
             'employee' => $employee->load(['branch.client', 'hrActions.createdBy']),
@@ -339,7 +365,7 @@ class EmployeeController extends Controller
         ]);
     }
 
-    // ── Destroy ────────────────────────────────────────────────────────────────
+    // ── Destroy (soft delete) ──────────────────────────────────────────────────
 
     public function destroy(Employee $employee)
     {
@@ -350,7 +376,75 @@ class EmployeeController extends Controller
 
         $employee->delete();
 
-        return response()->json(['message' => 'Employee deleted successfully.']);
+        return response()->json(['message' => 'Employee moved to trash.']);
+    }
+
+    // ── Trashed (recently deleted) ─────────────────────────────────────────────
+
+    public function trashed(Request $request)
+    {
+        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
+        $query = Employee::onlyTrashed()->with(['branch.client', 'createdBy']);
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('full_name',        'like', "%{$search}%")
+                  ->orWhere('email',          'like', "%{$search}%")
+                  ->orWhere('contact_number', 'like', "%{$search}%");
+            });
+        }
+
+        $query->orderBy('deleted_at', 'desc');
+
+        $perPage = in_array((int) $request->get('per_page'), [15, 30, 50])
+                    ? (int) $request->get('per_page') : 15;
+
+        return response()->json($query->paginate($perPage));
+    }
+
+    // ── Restore ────────────────────────────────────────────────────────────────
+
+    public function restore(int $id)
+    {
+        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
+        $employee = Employee::onlyTrashed()->findOrFail($id);
+
+        // Only restore the employee directly.
+        // If this employee was linked to an applicant, the applicant
+        // can be restored separately from the Applicants trash tab,
+        // which will also restore this employee via Option A logic.
+        $employee->restore();
+
+        return response()->json([
+            'message'  => 'Employee restored successfully.',
+            'employee' => $employee->load(['branch.client', 'createdBy']),
+        ]);
+    }
+
+    // ── Force Delete (permanent) ───────────────────────────────────────────────
+
+    public function forceDelete(int $id)
+    {
+        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
+        $employee = Employee::onlyTrashed()->findOrFail($id);
+
+        if ($employee->profile_photo) {
+            Storage::disk(config('filesystems.default'))->delete($employee->profile_photo);
+        }
+
+        $employee->forceDelete();
+
+        return response()->json(['message' => 'Employee permanently deleted.']);
     }
 
     // ── HR Actions ─────────────────────────────────────────────────────────────
@@ -368,67 +462,157 @@ class EmployeeController extends Controller
     }
 
     public function addHrAction(Request $request, Employee $employee)
-    {
-        $branchIds = $this->allowedBranchIds();
-        if ($branchIds !== null && !in_array($employee->branch_id, $branchIds)) {
-            return response()->json(['message' => 'Access denied.'], 403);
-        }
-
-        $validated = $request->validate([
-            'type'        => 'required|in:memo,ir,loa',
-            'subject'     => 'nullable|string|max:255',
-            'description' => 'nullable|string',
-            'action_date' => 'required|date',
-            'loa_start'   => 'nullable|date|required_if:type,loa',
-            'loa_end'     => 'nullable|date|after_or_equal:loa_start',
-        ]);
-
-        $validated['employee_id'] = $employee->id;
-        $validated['created_by']  = auth()->id();
-
-        $action = EmployeeHrAction::create($validated);
-
-        return response()->json([
-            'message' => 'HR action added successfully.',
-            'action'  => $action->load('createdBy'),
-        ], 201);
+{
+    $branchIds = $this->allowedBranchIds();
+    if ($branchIds !== null && !in_array($employee->branch_id, $branchIds)) {
+        return response()->json(['message' => 'Access denied.'], 403);
     }
-
-    public function updateHrAction(Request $request, Employee $employee, EmployeeHrAction $action)
-    {
-        if ($action->employee_id !== $employee->id) {
-            return response()->json(['message' => 'Action does not belong to this employee.'], 403);
-        }
-
-        $validated = $request->validate([
-            'type'        => 'sometimes|in:memo,ir,loa',
-            'subject'     => 'nullable|string|max:255',
-            'description' => 'nullable|string',
-            'action_date' => 'sometimes|date',
-            'loa_start'   => 'nullable|date',
-            'loa_end'     => 'nullable|date|after_or_equal:loa_start',
-        ]);
-
-        $action->update($validated);
-
-        return response()->json([
-            'message' => 'HR action updated successfully.',
-            'action'  => $action->load('createdBy'),
-        ]);
+ 
+    $validated = $request->validate([
+        'type'        => 'required|in:memo,ir,loa',
+        'subject'     => 'nullable|string|max:255',
+        'description' => 'nullable|string',
+        'action_date' => 'required|date',
+        'loa_start'   => 'nullable|date|required_if:type,loa',
+        'loa_end'     => 'nullable|date|after_or_equal:loa_start',
+        'file'        => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+    ]);
+ 
+    // Handle file upload
+    $filePath = null;
+    $fileName = null;
+    $fileSize = null;
+ 
+    if ($request->hasFile('file')) {
+        $file     = $request->file('file');
+        $safeName = Str::slug($employee->full_name);
+        $dateStr  = now()->format('Ymd_His');
+        $fileName = $file->getClientOriginalName();
+        $filePath = $file->storeAs(
+            'hr_actions',
+            "{$validated['type']}_{$safeName}_{$dateStr}." . $file->getClientOriginalExtension(),
+            'public'
+        );
+        $fileSize = $file->getSize();
     }
-
-    public function deleteHrAction(Employee $employee, EmployeeHrAction $action)
-    {
-        if ($action->employee_id !== $employee->id) {
-            return response()->json(['message' => 'Action does not belong to this employee.'], 403);
-        }
-
-        $action->delete();
-
-        return response()->json(['message' => 'HR action deleted successfully.']);
+ 
+    $action = EmployeeHrAction::create([
+        'employee_id' => $employee->id,
+        'type'        => $validated['type'],
+        'subject'     => $validated['subject']     ?? null,
+        'description' => $validated['description'] ?? null,
+        'action_date' => $validated['action_date'],
+        'loa_start'   => $validated['loa_start']   ?? null,
+        'loa_end'     => $validated['loa_end']      ?? null,
+        'file_name'   => $fileName,
+        'file_path'   => $filePath,
+        'file_size'   => $fileSize,
+        'created_by'  => auth()->id(),
+    ]);
+ 
+    return response()->json([
+        'message' => 'HR action added successfully.',
+        'action'  => $action->load('createdBy'),
+    ], 201);
+}
+ 
+// ── Update HR Action ───────────────────────────────────────────────────────────
+ 
+public function updateHrAction(Request $request, Employee $employee, EmployeeHrAction $action)
+{
+    if ($action->employee_id !== $employee->id) {
+        return response()->json(['message' => 'Action does not belong to this employee.'], 403);
     }
+ 
+    $validated = $request->validate([
+        'type'        => 'sometimes|in:memo,ir,loa',
+        'subject'     => 'nullable|string|max:255',
+        'description' => 'nullable|string',
+        'action_date' => 'sometimes|date',
+        'loa_start'   => 'nullable|date',
+        'loa_end'     => 'nullable|date|after_or_equal:loa_start',
+        'file'        => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+        'remove_file' => 'nullable|in:1',
+    ]);
+ 
+    // Remove existing file if requested
+    if ($request->input('remove_file') === '1') {
+        if ($action->file_path && Storage::disk('public')->exists($action->file_path)) {
+            Storage::disk('public')->delete($action->file_path);
+        }
+        $validated['file_path'] = null;
+        $validated['file_name'] = null;
+        $validated['file_size'] = null;
+    }
+ 
+    // Replace with new file if provided
+    if ($request->hasFile('file')) {
+        // Delete the old file first
+        if ($action->file_path && Storage::disk('public')->exists($action->file_path)) {
+            Storage::disk('public')->delete($action->file_path);
+        }
+ 
+        $file     = $request->file('file');
+        $safeName = Str::slug($employee->full_name);
+        $dateStr  = now()->format('Ymd_His');
+        $type     = $request->input('type', $action->type);
+ 
+        $validated['file_name'] = $file->getClientOriginalName();
+        $validated['file_path'] = $file->storeAs(
+            'hr_actions',
+            "{$type}_{$safeName}_{$dateStr}." . $file->getClientOriginalExtension(),
+            'public'
+        );
+        $validated['file_size'] = $file->getSize();
+    }
+ 
+    // Remove internal keys before updating
+    unset($validated['file'], $validated['remove_file']);
+ 
+    $action->update($validated);
+ 
+    return response()->json([
+        'message' => 'HR action updated successfully.',
+        'action'  => $action->load('createdBy'),
+    ]);
+}
+ 
+// ── Delete HR Action ───────────────────────────────────────────────────────────
+ 
+public function deleteHrAction(Employee $employee, EmployeeHrAction $action)
+{
+    if ($action->employee_id !== $employee->id) {
+        return response()->json(['message' => 'Action does not belong to this employee.'], 403);
+    }
+ 
+    // Clean up the physical file
+    if ($action->file_path && Storage::disk('public')->exists($action->file_path)) {
+        Storage::disk('public')->delete($action->file_path);
+    }
+ 
+    $action->delete();
+ 
+    return response()->json(['message' => 'HR action deleted successfully.']);
+}
+ 
+// ── Get File URL (for viewing in browser) ─────────────────────────────────────
+ 
+public function getHrActionFileUrl(Employee $employee, EmployeeHrAction $action)
+{
+    if ($action->employee_id !== $employee->id) {
+        return response()->json(['message' => 'Action does not belong to this employee.'], 403);
+    }
+ 
+    if (!$action->file_path || !Storage::disk('public')->exists($action->file_path)) {
+        return response()->json(['message' => 'No file attached to this action.'], 404);
+    }
+ 
+    return response()->json([
+        'url' => Storage::disk('public')->url($action->file_path),
+    ]);
+}
 
-    // ── Custom Fields ─────────────────────────────────────────────────────────
+    // ── Custom Fields ──────────────────────────────────────────────────────────
 
     public function updateCustomFields(Request $request, Employee $employee)
     {
@@ -438,7 +622,8 @@ class EmployeeController extends Controller
         }
 
         $existing = $employee->custom_fields ?? [];
-        $employee->custom_fields = array_merge($existing, $request->all());
+$data = $request->only(['field1', 'field2']); // define allowed keys
+$employee->custom_fields = array_merge($existing, $data);
         $employee->save();
 
         return response()->json([

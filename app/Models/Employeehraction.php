@@ -2,12 +2,12 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class EmployeeHrAction extends Model
 {
-    use HasFactory;
+    use SoftDeletes;
 
     protected $fillable = [
         'employee_id',
@@ -17,6 +17,10 @@ class EmployeeHrAction extends Model
         'action_date',
         'loa_start',
         'loa_end',
+        // ── File attachment ──
+        'file_name',
+        'file_path',
+        'file_size',
         'created_by',
     ];
 
@@ -40,16 +44,17 @@ class EmployeeHrAction extends Model
 
     // ── Helpers ────────────────────────────────────────────────────────────────
 
-    /**
-     * Human-readable type label.
-     */
-    public function getTypeLabelAttribute(): string
+    public function hasFile(): bool
     {
-        return match ($this->type) {
-            'memo' => 'Memo',
-            'ir'   => 'Incident Report',
-            'loa'  => 'Leave of Absence',
-            default => strtoupper($this->type),
-        };
+        return !empty($this->file_path);
+    }
+
+    public function getFileSizeFormattedAttribute(): string
+    {
+        if (!$this->file_size) return '—';
+        $kb = $this->file_size / 1024;
+        return $kb < 1024
+            ? round($kb, 1) . ' KB'
+            : round($kb / 1024, 2) . ' MB';
     }
 }
