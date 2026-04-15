@@ -614,21 +614,33 @@ public function getHrActionFileUrl(Employee $employee, EmployeeHrAction $action)
 
     // ── Custom Fields ──────────────────────────────────────────────────────────
 
-    public function updateCustomFields(Request $request, Employee $employee)
-    {
-        $branchIds = $this->allowedBranchIds();
-        if ($branchIds !== null && !in_array($employee->branch_id, $branchIds)) {
-            return response()->json(['message' => 'Access denied.'], 403);
-        }
-
-        $existing = $employee->custom_fields ?? [];
-$data = $request->only(['field1', 'field2']); // define allowed keys
-$employee->custom_fields = array_merge($existing, $data);
-        $employee->save();
-
-        return response()->json([
-            'message'       => 'Custom fields updated.',
-            'custom_fields' => $employee->custom_fields,
-        ]);
+   public function updateCustomFields(Request $request, Employee $employee)
+{
+    // Role guard
+    if (!auth()->user()->hasRole(['super_admin', 'hr_admin', 'talent_acquisition'])) {
+        return response()->json(['message' => 'Unauthorized.'], 403);
     }
+
+    // Branch guard
+    $branchIds = $this->allowedBranchIds();
+    if ($branchIds !== null && !in_array($employee->branch_id, $branchIds)) {
+        return response()->json(['message' => 'Access denied.'], 403);
+    }
+
+    // Only accept keys that exist as custom columns for this page
+    $validKeys = \App\Models\CustomColumn::where('page', 'hired')
+        ->pluck('field_key')
+        ->toArray();
+
+    $incoming = $request->only($validKeys);
+
+    $existing = $employee->custom_fields ?? [];
+    $employee->custom_fields = array_merge($existing, $incoming);
+    $employee->save();
+
+    return response()->json([
+        'message'       => 'Custom fields updated.',
+        'custom_fields' => $employee->custom_fields,
+    ]);
+}
 }

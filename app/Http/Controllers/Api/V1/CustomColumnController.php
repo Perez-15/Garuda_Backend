@@ -230,4 +230,53 @@ class CustomColumnController extends Controller
             'message' => 'Table and all its columns deleted successfully.',
         ]);
     }
+
+    public function batch(Request $request)
+{
+    $page    = $request->input('page');
+    $columns = $request->input('columns', []);
+
+    DB::transaction(function () use ($page, $columns) {
+        $incoming_ids = collect($columns)->pluck('id')->filter()->values();
+
+        // delete rows not in incoming list (that aren't fixed — safety)
+        DB::table('custom_columns')
+            ->where('page', $page)
+            ->where('is_fixed', 0)
+            ->whereNotIn('id', $incoming_ids)
+            ->delete();
+
+        foreach ($columns as $col) {
+            if (!empty($col['id'])) {
+                DB::table('custom_columns')->where('id', $col['id'])->update([
+                    'section'  => $col['section'],
+                    'label'    => $col['label'],
+                    'type'     => $col['type'],
+                    'options'  => $col['options'],
+                    'required' => $col['required'],
+                    'order'    => $col['order'],
+                    'updated_at' => now(),
+                ]);
+            } else {
+                DB::table('custom_columns')->insert([
+                    'page'       => $page,
+                    'section'    => $col['section'],
+                    'field_key'  => $col['field_key'],
+                    'label'      => $col['label'],
+                    'type'       => $col['type'],
+                    'options'    => $col['options'],
+                    'required'   => $col['required'] ?? 0,
+                    'is_fixed'   => 0,
+                    'order'      => $col['order'],
+                    'scope'      => 'ext',
+                    'created_by' => auth()->id() ?? 1,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+    });
+
+    return response()->json(['message' => 'Saved.']);
+}
 }

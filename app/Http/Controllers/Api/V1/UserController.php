@@ -348,21 +348,23 @@ class UserController extends Controller
 
     // ── Private Helpers ────────────────────────────────────────────────────────
 
-    private function authorizeAdmin(): void
-    {
-        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
-            abort(403, 'Unauthorized.');
-        }
+private function authorizeAdmin(): void
+{
+    if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
+        // ✅ was: abort(403, 'Unauthorized.');
+        response()->json(['message' => 'Unauthorized.'], 403)->throwResponse();
     }
+}
 
-    private function authorizeAdminOrSelf(User $user): void
-    {
-        $authUser = auth()->user();
-        if (
-            $authUser->id !== $user->id &&
-            !$authUser->hasRole(['super_admin', 'hr_admin'])
-        ) {
-            abort(403, 'Unauthorized.');
-        }
+private function authorizeAdminOrSelf(User $user): void
+{
+    $authUser = auth()->user();
+    if (
+        $authUser->id !== $user->id &&
+        !$authUser->hasRole(['super_admin', 'hr_admin'])
+    ) {
+        // ✅ was: abort(403, 'Unauthorized.');
+        response()->json(['message' => 'Unauthorized.'], 403)->throwResponse();
     }
+}
 }

@@ -3,58 +3,46 @@
 namespace App\Http\Controllers\Api\Public;
 
 use App\Http\Controllers\Controller;
-use App\Models\Applicant;
-use App\Models\Workflow;
+use App\Models\WebsiteApplication;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class ApplicationController extends Controller
 {
+    /**
+     * Receive a job application from the public marketing website.
+     * No authentication required.
+     * Stores into website_applications (staging table) — HR reviews from Garuda.
+     */
     public function store(Request $request)
     {
-        $validated = $request->validate([
-            'full_name' => 'required|string|max:255',
-            'email' => 'required|email|unique:applicants,email',
-            'phone' => 'required|string|max:20',
-            'branch_id' => 'required|exists:branches,id',
-            'resume' => 'nullable|file|mimes:pdf,doc,docx|max:5120',
+        $request->validate([
+            'full_name'       => 'required|string|max:255',
+            'email'           => 'required|email|max:255',
+            'phone'           => 'required|string|max:20',
+            'address'         => 'nullable|string|max:500',
+            'position_applied'=> 'required|string|max:255',
+            'job_posting_id'  => 'nullable|integer|exists:job_postings,id',
+            'resume'          => 'required|file|mimes:pdf,docx,doc|max:5120', // 5MB max
         ]);
 
-        // Get workflow for the branch
-        $workflow = Workflow::where('branch_id', $validated['branch_id'])
-            ->where('is_active', true)
-            ->first();
+        // Store resume in storage/app/public/website-resumes/
+        $resumePath = $request->file('resume')->store('website-resumes', 'public');
 
-        if (!$workflow) {
-            return response()->json([
-                'message' => 'No active workflow found for this branch',
-            ], 400);
-        }
-
-        // Get first step
-        $firstStep = $workflow->steps()->orderBy('step_order')->first();
-
-        // Handle resume upload
-        if ($request->hasFile('resume')) {
-            $resumePath = $request->file('resume')->store('resumes', 'public');
-            $validated['resume_path'] = $resumePath;
-        }
-
-        $validated['source'] = 'WordPress';
-        $validated['workflow_id'] = $workflow->id;
-        $validated['current_step_id'] = $firstStep?->id;
-        $validated['applied_at'] = now();
-
-        $applicant = Applicant::create($validated);
-
-        // Log activity
-        $applicant->activities()->create([
-            'activity_type' => 'created',
-            'description' => 'Application submitted via WordPress',
+        $application = WebsiteApplication::create([
+            'full_name'        => $request->full_name,
+            'email'            => $request->email,
+            'phone'            => $request->phone,
+            'address'          => $request->address,
+            'position_applied' => $request->position_applied,
+            'job_posting_id'   => $request->job_posting_id,
+            'resume_path'      => $resumePath,
+            'status'           => 'pending',
         ]);
 
         return response()->json([
-            'message' => 'Application submitted successfully',
-            'applicant_id' => $applicant->id,
+            'message' => 'Application submitted successfully. We will get in touch with you soon!',
+            'id'      => $application->id,
         ], 201);
     }
 }

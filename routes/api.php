@@ -10,7 +10,6 @@ use App\Http\Controllers\Api\V1\WorkflowController;
 use App\Http\Controllers\Api\V1\WorkflowStepController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\ReportController;
-use App\Http\Controllers\Api\Public\ApplicationController;
 use App\Http\Controllers\Api\V1\PositionController;
 use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\EmployeeController;
@@ -18,8 +17,13 @@ use App\Http\Controllers\Api\V1\CustomColumnController;
 use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\PerformanceController;
 use App\Http\Controllers\Api\V1\LoaWebhookController;
-Illuminate\Routing\Middleware\SubstituteBindings::class;
-Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class;
+use App\Http\Controllers\Api\V1\WebsiteApplicationController;
+use App\Http\Controllers\Api\Public\ApplicationController;
+use App\Http\Controllers\Api\Public\JobPostingController as PublicJobPostingController;
+use App\Http\Controllers\Api\Marketing\AuthController as MarketingAuthController;
+use App\Http\Controllers\Api\Marketing\JobPostingController as MarketingJobPostingController;
+use App\Http\Controllers\Api\Marketing\ContactInquiryController as MarketingContactInquiryController;
+
 /*
 |--------------------------------------------------------------------------
 | Public API Routes (No Authentication Required)
@@ -27,6 +31,8 @@ Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class;
 */
 Route::prefix('v1/public')->group(function () {
     Route::post('/applications', [ApplicationController::class, 'store']);
+    Route::get('/jobs',          [PublicJobPostingController::class, 'index']);
+    Route::post('/contact',      [MarketingContactInquiryController::class, 'store']); // ← new
 });
 
 /*
@@ -40,6 +46,42 @@ Route::prefix('v1')->group(function () {
 });
 
 Route::post('/v1/loa/webhook', [LoaWebhookController::class, 'receive']);
+
+/*
+|--------------------------------------------------------------------------
+| Marketing Auth (No Authentication Required)
+|--------------------------------------------------------------------------
+*/
+Route::prefix('v1')->group(function () {
+    Route::prefix('marketing')->group(function () {
+        Route::post('/login', [MarketingAuthController::class, 'login']);
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| Marketing Protected Routes (Sanctum — marketing/hr_admin/super_admin roles)
+|--------------------------------------------------------------------------
+*/
+Route::prefix('v1/marketing')->middleware('auth:sanctum')->group(function () {
+    Route::post('/logout', [MarketingAuthController::class, 'logout']);
+    Route::get('/me',      [MarketingAuthController::class, 'me']);
+
+    // ── Job Postings CRUD ──────────────────────────────────────────────────────
+    Route::get   ('/jobs',                     [MarketingJobPostingController::class, 'index']);
+    Route::post  ('/jobs',                     [MarketingJobPostingController::class, 'store']);
+    Route::get   ('/jobs/{jobPosting}',        [MarketingJobPostingController::class, 'show']);
+    Route::put   ('/jobs/{jobPosting}',        [MarketingJobPostingController::class, 'update']);
+    Route::delete('/jobs/{jobPosting}',        [MarketingJobPostingController::class, 'destroy']);
+    Route::patch ('/jobs/{jobPosting}/toggle', [MarketingJobPostingController::class, 'toggleActive']);
+
+    // ── Contact Inquiries ──────────────────────────────────────────────────────
+    Route::get   ('/contact-inquiries',                        [MarketingContactInquiryController::class, 'index']);
+    Route::patch ('/contact-inquiries/{inquiry}/read',         [MarketingContactInquiryController::class, 'markRead']);
+    Route::patch ('/contact-inquiries/{inquiry}/archive',      [MarketingContactInquiryController::class, 'archive']);
+    Route::delete('/contact-inquiries/{inquiry}',              [MarketingContactInquiryController::class, 'destroy']);
+});
+
 /*
 |--------------------------------------------------------------------------
 | Protected API Routes (Require Authentication)
@@ -105,9 +147,9 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::post('employees/{employee}/hr-actions',            [EmployeeController::class, 'addHrAction']);
     Route::patch('employees/{employee}/hr-actions/{action}',  [EmployeeController::class, 'updateHrAction']);
     Route::delete('employees/{employee}/hr-actions/{action}', [EmployeeController::class, 'deleteHrAction']);
-    Route::get('/{employee}/hr-actions/{action}/file-url', [EmployeeController::class, 'hrActionFileUrl']);
-    
-        // ── Clients ────────────────────────────────────────────────────────────────
+    Route::get('/{employee}/hr-actions/{action}/file-url',    [EmployeeController::class, 'hrActionFileUrl']);
+
+    // ── Clients ────────────────────────────────────────────────────────────────
     Route::apiResource('clients', ClientController::class);
 
     // ── Branches ───────────────────────────────────────────────────────────────
@@ -130,12 +172,12 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('reports/conversion-rate',      [ReportController::class, 'conversionRate']);
     Route::get('reports/export',               [ReportController::class, 'export']);
     Route::get('reports/top-recruiters',       [ReportController::class, 'topRecruiters']);
-    
-    Route::post('/v1/loa/webhook', [LoaWebhookController::class, 'receive']);
+
     // ── Performance ────────────────────────────────────────────────────────────
-    Route::get('/performance/ta',       [PerformanceController::class, 'taPerformance']);
-    Route::get('/performance/branches', [PerformanceController::class, 'branchPerformance']);
-    Route::get('/performance/ta/{taId}/applicants', [PerformanceController::class, 'taApplicants']);
+    Route::get('/performance/ta',                       [PerformanceController::class, 'taPerformance']);
+    Route::get('/performance/branches',                 [PerformanceController::class, 'branchPerformance']);
+    Route::get('/performance/ta/{taId}/applicants',     [PerformanceController::class, 'taApplicants']);
+
     // ── Custom Columns ─────────────────────────────────────────────────────────
     // IMPORTANT: named routes must come BEFORE apiResource
     Route::get   ('custom-columns/tables',        [CustomColumnController::class, 'getTables']);
@@ -144,4 +186,12 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::delete('custom-columns/tables/{page}', [CustomColumnController::class, 'destroyTable']);
     Route::post  ('custom-columns/reorder',       [CustomColumnController::class, 'reorder']);
     Route::apiResource('custom-columns', CustomColumnController::class);
+    Route::post('/custom-columns/batch', [CustomColumnController::class, 'batch']);
+    // ── Website Applications (from marketing site) ─────────────────────────────
+    // IMPORTANT: pending-count must come BEFORE {websiteApplication} wildcard
+    Route::get ('website-applications/pending-count',               [WebsiteApplicationController::class, 'pendingCount']);
+    Route::get ('website-applications',                             [WebsiteApplicationController::class, 'index']);
+    Route::post('website-applications/{websiteApplication}/accept', [WebsiteApplicationController::class, 'accept']);
+    Route::post('website-applications/{websiteApplication}/dismiss',[WebsiteApplicationController::class, 'dismiss']);
+    Route::get ('website-applications/{websiteApplication}/resume', [WebsiteApplicationController::class, 'resumeUrl']);
 });

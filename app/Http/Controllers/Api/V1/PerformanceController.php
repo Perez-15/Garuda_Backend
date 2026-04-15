@@ -34,14 +34,6 @@ class PerformanceController extends Controller
         return $query;
     }
 
-    // ── TA Performance ─────────────────────────────────────────────────────────
-    //
-    // Returns one row per Talent Acquisition user with:
-    //   in_process  – applicants they added currently with status = 'active'
-    //   deployed    – applicants they added with status = 'hired'  (respects date_filter)
-    //   pooling     – applicants they added currently with status = 'pooling'
-    //   total       – in_process + deployed + pooling
-    //   efficiency  – deployed ÷ total  (as a percentage, 0-100)
 
     public function taPerformance(Request $request)
     {
@@ -52,7 +44,8 @@ class PerformanceController extends Controller
 
         // Fetch all TA users
         $taUsers = User::role('talent_acquisition')
-            ->get(['id', 'name', 'profile_photo']);
+    ->with('branches.client')
+    ->get(['id', 'name', 'profile_photo']);
 
         $results = $taUsers->map(function (User $ta) use ($request) {
 
@@ -72,16 +65,17 @@ class PerformanceController extends Controller
             $total      = $inProcess + $deployed + $pooling;
             $efficiency = $total > 0 ? round(($deployed / $total) * 100, 1) : 0;
 
-            return [
-                'id'         => $ta->id,
-                'name'       => $ta->name,
-                'avatar'     => $ta->profile_photo,
-                'in_process' => $inProcess,
-                'deployed'   => $deployed,
-                'pooling'    => $pooling,
-                'total'      => $total,
-                'efficiency' => $efficiency,
-            ];
+           return [
+    'id'         => $ta->id,
+    'name'       => $ta->name,
+    'avatar'     => $ta->profile_photo,
+    'clients' => $ta->branches->pluck('client.name')->unique()->values()->toArray(),
+    'in_process' => $inProcess,
+    'deployed'   => $deployed,
+    'pooling'    => $pooling,
+    'total'      => $total,
+    'efficiency' => $efficiency,
+];
         });
 
         // Sort: most deployed first, then by efficiency
@@ -92,15 +86,6 @@ class PerformanceController extends Controller
             'date_filter' => $request->get('date_filter', 'all'),
         ]);
     }
-
-    // ── Branch Performance ─────────────────────────────────────────────────────
-    //
-    // Returns one row per active branch with:
-    //   client          – the client name
-    //   employees       – total active employees at that branch
-    //   in_process      – applicants currently with status = 'active' at this branch
-    //                     (respects date_filter on applied_at)
-    //   incomplete_docs – employees whose requirements_status ≠ 'complete'
 
     public function branchPerformance(Request $request)
     {
