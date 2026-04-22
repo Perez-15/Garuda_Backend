@@ -17,6 +17,7 @@ class Position extends Model
         'description',
         'slots',
         'is_active',
+        'created_by',
     ];
 
     protected $casts = [
@@ -31,5 +32,10 @@ class Position extends Model
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+     public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
     }
 }

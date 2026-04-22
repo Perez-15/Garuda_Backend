@@ -331,94 +331,77 @@ class ApplicantController extends Controller
 
     // ── Trashed (recently deleted) ─────────────────────────────────────────────
 
-    public function trashed(Request $request)
-    {
-        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
-            return response()->json(['message' => 'Unauthorized.'], 403);
-        }
+   public function trashed(Request $request)
+{
+    $user  = auth()->user();
+    $query = Applicant::onlyTrashed()
+        ->with(['branch.client', 'createdBy', 'employee' => fn($q) => $q->withTrashed()]);
 
-        $query = Applicant::onlyTrashed()
-            ->with(['branch.client', 'createdBy', 'employee' => function ($q) {
-                $q->withTrashed();
-            }]);
-
-        if ($request->filled('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('full_name', 'like', "%{$search}%")
-                  ->orWhere('email',   'like', "%{$search}%")
-                  ->orWhere('phone',   'like', "%{$search}%");
-            });
-        }
-
-        $query->orderBy('deleted_at', 'desc');
-
-        $perPage = in_array((int) $request->get('per_page'), [15, 30, 50])
-                    ? (int) $request->get('per_page') : 15;
-
-        return response()->json($query->paginate($perPage));
+    // TAs only see their own deleted applicants
+    if (!$user->hasRole(['super_admin', 'hr_admin'])) {
+        $query->where('created_by', $user->id);
     }
 
+    if ($request->filled('search')) {
+        $search = $request->search;
+        $query->where(function ($q) use ($search) {
+            $q->where('full_name', 'like', "%{$search}%")
+              ->orWhere('email',   'like', "%{$search}%")
+              ->orWhere('phone',   'like', "%{$search}%");
+        });
+    }
+
+    $query->orderBy('deleted_at', 'desc');
+    $perPage = in_array((int) $request->get('per_page'), [15, 30, 50]) ? (int) $request->get('per_page') : 15;
+
+    return response()->json($query->paginate($perPage));
+}
     // ── Restore ────────────────────────────────────────────────────────────────
 
     public function restore(int $id)
-    {
-        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
-            return response()->json(['message' => 'Unauthorized.'], 403);
-        }
+{
+    $user      = auth()->user();
+    $applicant = Applicant::onlyTrashed()->findOrFail($id);
 
-        $applicant = Applicant::onlyTrashed()->findOrFail($id);
-
-        DB::transaction(function () use ($applicant) {
-            $applicant->restore();
-
-            $linkedEmployee = Employee::withTrashed()
-                ->where('applicant_id', $applicant->id)
-                ->whereNotNull('deleted_at')
-                ->first();
-
-            if ($linkedEmployee) {
-                $linkedEmployee->restore();
-            }
-        });
-
-        return response()->json([
-            'message'   => 'Applicant restored successfully.',
-            'applicant' => $applicant->load(['branch.client', 'createdBy', 'employee']),
-        ]);
+    // TA can only restore their own
+    if (!$user->hasRole(['super_admin', 'hr_admin']) && (int) $applicant->created_by !== (int) $user->id) {
+        return response()->json(['message' => 'Unauthorized.'], 403);
     }
 
-    // ── Force Delete (permanent) ───────────────────────────────────────────────
+    DB::transaction(function () use ($applicant) {
+        $applicant->restore();
+        $linked = Employee::withTrashed()->where('applicant_id', $applicant->id)->whereNotNull('deleted_at')->first();
+        if ($linked) $linked->restore();
+    });
 
-    public function forceDelete(int $id)
-    {
-        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
-            return response()->json(['message' => 'Unauthorized.'], 403);
-        }
+    return response()->json([
+        'message'   => 'Applicant restored successfully.',
+        'applicant' => $applicant->load(['branch.client', 'createdBy', 'employee']),
+    ]);
+}
 
-        $applicant = Applicant::onlyTrashed()->findOrFail($id);
+public function forceDelete(int $id)
+{
+    $user      = auth()->user();
+    $applicant = Applicant::onlyTrashed()->findOrFail($id);
 
-        DB::transaction(function () use ($applicant) {
-            $linkedEmployee = Employee::withTrashed()
-                ->where('applicant_id', $applicant->id)
-                ->first();
-
-            if ($linkedEmployee) {
-                if ($linkedEmployee->profile_photo) {
-                    Storage::disk(config('filesystems.default'))->delete($linkedEmployee->profile_photo);
-                }
-                $linkedEmployee->forceDelete();
-            }
-
-            if ($applicant->resume_path) {
-                Storage::disk('public')->delete($applicant->resume_path);
-            }
-
-            $applicant->forceDelete();
-        });
-
-        return response()->json(['message' => 'Applicant permanently deleted.']);
+    // TA can only force-delete their own
+    if (!$user->hasRole(['super_admin', 'hr_admin']) && (int) $applicant->created_by !== (int) $user->id) {
+        return response()->json(['message' => 'Unauthorized.'], 403);
     }
+
+    DB::transaction(function () use ($applicant) {
+        $linked = Employee::withTrashed()->where('applicant_id', $applicant->id)->first();
+        if ($linked) {
+            if ($linked->profile_photo) Storage::disk(config('filesystems.default'))->delete($linked->profile_photo);
+            $linked->forceDelete();
+        }
+        if ($applicant->resume_path) Storage::disk('public')->delete($applicant->resume_path);
+        $applicant->forceDelete();
+    });
+
+    return response()->json(['message' => 'Applicant permanently deleted.']);
+}
 
     // ── Move Step ──────────────────────────────────────────────────────────────
 

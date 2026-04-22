@@ -381,71 +381,65 @@ class EmployeeController extends Controller
 
     // ── Trashed (recently deleted) ─────────────────────────────────────────────
 
-    public function trashed(Request $request)
-    {
-        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
-            return response()->json(['message' => 'Unauthorized.'], 403);
-        }
+   public function trashed(Request $request)
+{
+    $user  = auth()->user();
+    $query = Employee::onlyTrashed()->with(['branch.client', 'createdBy']);
 
-        $query = Employee::onlyTrashed()->with(['branch.client', 'createdBy']);
-
-        if ($request->filled('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('full_name',        'like', "%{$search}%")
-                  ->orWhere('email',          'like', "%{$search}%")
-                  ->orWhere('contact_number', 'like', "%{$search}%");
-            });
-        }
-
-        $query->orderBy('deleted_at', 'desc');
-
-        $perPage = in_array((int) $request->get('per_page'), [15, 30, 50])
-                    ? (int) $request->get('per_page') : 15;
-
-        return response()->json($query->paginate($perPage));
+    // TAs only see employees they created
+    if (!$user->hasRole(['super_admin', 'hr_admin'])) {
+        $query->where('created_by', $user->id);
     }
 
-    // ── Restore ────────────────────────────────────────────────────────────────
-
-    public function restore(int $id)
-    {
-        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
-            return response()->json(['message' => 'Unauthorized.'], 403);
-        }
-
-        $employee = Employee::onlyTrashed()->findOrFail($id);
-
-        // Only restore the employee directly.
-        // If this employee was linked to an applicant, the applicant
-        // can be restored separately from the Applicants trash tab,
-        // which will also restore this employee via Option A logic.
-        $employee->restore();
-
-        return response()->json([
-            'message'  => 'Employee restored successfully.',
-            'employee' => $employee->load(['branch.client', 'createdBy']),
-        ]);
+    if ($request->filled('search')) {
+        $search = $request->search;
+        $query->where(function ($q) use ($search) {
+            $q->where('full_name',        'like', "%{$search}%")
+              ->orWhere('email',          'like', "%{$search}%")
+              ->orWhere('contact_number', 'like', "%{$search}%");
+        });
     }
 
-    // ── Force Delete (permanent) ───────────────────────────────────────────────
+    $query->orderBy('deleted_at', 'desc');
+    $perPage = in_array((int) $request->get('per_page'), [15, 30, 50]) ? (int) $request->get('per_page') : 15;
 
-    public function forceDelete(int $id)
-    {
-        if (!auth()->user()->hasRole(['super_admin', 'hr_admin'])) {
-            return response()->json(['message' => 'Unauthorized.'], 403);
-        }
+    return response()->json($query->paginate($perPage));
+}
 
-        $employee = Employee::onlyTrashed()->findOrFail($id);
+public function restore(int $id)
+{
+    $user     = auth()->user();
+    $employee = Employee::onlyTrashed()->findOrFail($id);
 
-        if ($employee->profile_photo) {
-            Storage::disk(config('filesystems.default'))->delete($employee->profile_photo);
-        }
-
-        $employee->forceDelete();
-
-        return response()->json(['message' => 'Employee permanently deleted.']);
+    if (!$user->hasRole(['super_admin', 'hr_admin']) && (int) $employee->created_by !== (int) $user->id) {
+        return response()->json(['message' => 'Unauthorized.'], 403);
     }
+
+    $employee->restore();
+
+    return response()->json([
+        'message'  => 'Employee restored successfully.',
+        'employee' => $employee->load(['branch.client', 'createdBy']),
+    ]);
+}
+
+public function forceDelete(int $id)
+{
+    $user     = auth()->user();
+    $employee = Employee::onlyTrashed()->findOrFail($id);
+
+    if (!$user->hasRole(['super_admin', 'hr_admin']) && (int) $employee->created_by !== (int) $user->id) {
+        return response()->json(['message' => 'Unauthorized.'], 403);
+    }
+
+    if ($employee->profile_photo) {
+        Storage::disk(config('filesystems.default'))->delete($employee->profile_photo);
+    }
+
+    $employee->forceDelete();
+
+    return response()->json(['message' => 'Employee permanently deleted.']);
+}
 
     // ── HR Actions ─────────────────────────────────────────────────────────────
 

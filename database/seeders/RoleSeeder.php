@@ -102,6 +102,23 @@ class RoleSeeder extends Seeder
             'assign_branches',   // HR Admin can manage TA branch access ← NEW
         ]);
 
+        // ── Accounting ─────────────────────────────────────────────────────────────
+
+$accounting = Role::firstOrCreate(['name' => 'accounting']);
+$accounting->syncPermissions([
+    'view_applicants',
+    'view_reports',
+    'export_reports',
+]);
+
+// ── Marketing ──────────────────────────────────────────────────────────────
+
+$marketing = Role::firstOrCreate(['name' => 'marketing']);
+$marketing->syncPermissions([
+    'view_clients',
+    'create_clients',
+    'edit_clients',
+]);
         // ── Talent Acquisition ─────────────────────────────────────────────────
         // Scoped to assigned branches via ApplicantController logic,
         // NOT via permissions — the controller handles the restriction.

@@ -24,6 +24,7 @@ class User extends Authenticatable
         'contact_number',
         'address',
         'date_of_birth',
+        'age',
         'gender',
         'civil_status',
         'emergency_contact_name',
@@ -32,6 +33,12 @@ class User extends Authenticatable
         // ── Employment ─────────────────────────────────────────────────────
         'department',
         'date_hired',
+        'date_ended',
+        'date_resigned',
+        'daily_rate',
+        'employment_status',
+        'source',
+        'remarks',
 
         // ── Requirements / Documents ───────────────────────────────────────
         'nbi_status',
@@ -61,8 +68,12 @@ class User extends Authenticatable
         'email_verified_at' => 'datetime',
         'password'          => 'hashed',
         'is_active'         => 'boolean',
-        'date_hired'        => 'date',
+        'age'               => 'integer',
         'date_of_birth'     => 'date',
+        'date_hired'        => 'date',
+        'date_ended'        => 'date',
+        'date_resigned'     => 'date',
+        'daily_rate'        => 'decimal:2',
         'custom_fields'     => 'array',
     ];
 

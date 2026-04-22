@@ -23,7 +23,7 @@ use App\Http\Controllers\Api\Public\JobPostingController as PublicJobPostingCont
 use App\Http\Controllers\Api\Marketing\AuthController as MarketingAuthController;
 use App\Http\Controllers\Api\Marketing\JobPostingController as MarketingJobPostingController;
 use App\Http\Controllers\Api\Marketing\ContactInquiryController as MarketingContactInquiryController;
-
+use App\Http\Controllers\Api\V1\ClientProspectController;
 /*
 |--------------------------------------------------------------------------
 | Public API Routes (No Authentication Required)
@@ -151,7 +151,8 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
     // ── Clients ────────────────────────────────────────────────────────────────
     Route::apiResource('clients', ClientController::class);
-
+     Route::apiResource('client-prospects', ClientProspectController::class)
+        ->only(['index', 'store', 'update', 'destroy']);
     // ── Branches ───────────────────────────────────────────────────────────────
     Route::apiResource('branches', BranchController::class);
     Route::get('clients/{client}/branches', [BranchController::class, 'byClient']);
@@ -172,7 +173,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('reports/conversion-rate',      [ReportController::class, 'conversionRate']);
     Route::get('reports/export',               [ReportController::class, 'export']);
     Route::get('reports/top-recruiters',       [ReportController::class, 'topRecruiters']);
-
+    Route::get('/reports/applicants-trend', [ReportController::class, 'applicantsTrend']);
     // ── Performance ────────────────────────────────────────────────────────────
     Route::get('/performance/ta',                       [PerformanceController::class, 'taPerformance']);
     Route::get('/performance/branches',                 [PerformanceController::class, 'branchPerformance']);
@@ -186,7 +187,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::delete('custom-columns/tables/{page}', [CustomColumnController::class, 'destroyTable']);
     Route::post  ('custom-columns/reorder',       [CustomColumnController::class, 'reorder']);
     Route::apiResource('custom-columns', CustomColumnController::class);
-    Route::post('/custom-columns/batch', [CustomColumnController::class, 'batch']);
+    Route::post('/custom-columns/batch', [CustomColumnController::class, 'batch']); 
     // ── Website Applications (from marketing site) ─────────────────────────────
     // IMPORTANT: pending-count must come BEFORE {websiteApplication} wildcard
     Route::get ('website-applications/pending-count',               [WebsiteApplicationController::class, 'pendingCount']);

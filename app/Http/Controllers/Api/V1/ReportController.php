@@ -168,6 +168,28 @@ class ReportController extends Controller
         return response()->json(['data' => $recruiters]);
     }
 
+    public function applicantsTrend(Request $request)
+    {
+        $query = Applicant::select(
+                DB::raw('DATE(applied_at) as date'),
+                DB::raw('COUNT(*) as applicants'),
+                DB::raw('SUM(CASE WHEN status = "hired" THEN 1 ELSE 0 END) as hired')
+            )
+            ->groupBy(DB::raw('DATE(applied_at)'))
+            ->orderBy('date');
+
+        $this->applyDateFilter($query, $request);
+
+        if ($request->filled('branch_id')) {
+            $query->where('branch_id', $request->branch_id);
+        }
+        if ($request->filled('client_id')) {
+            $query->whereHas('branch', fn($q) => $q->where('client_id', $request->client_id));
+        }
+
+        return response()->json(['data' => $query->get()]);
+    }
+
     // ── Export ─────────────────────────────────────────────────────────────────
     public function export(Request $request)
     {

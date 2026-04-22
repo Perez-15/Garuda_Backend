@@ -129,62 +129,88 @@ class UserController extends Controller
 
     // ── Update ─────────────────────────────────────────────────────────────────
 
-    public function update(Request $request, User $user)
-    {
-        $this->authorizeAdmin();
+  public function update(Request $request, User $user)
+{
+    $authUser = auth()->user();
+    $isAdmin  = $authUser->hasRole(['super_admin', 'hr_admin']);
+    $isSelf   = $authUser->id === $user->id;
 
-        $validated = $request->validate([
-            'name'                    => 'sometimes|string|max:255',
-            'email'                   => 'sometimes|email|unique:users,email,' . $user->id,
-            'password'                => 'nullable|string|min:8',
-            'role'                    => 'nullable|string|exists:roles,name',
-            'is_active'               => 'boolean',
-            'contact_number'          => 'nullable|string|max:20',
-            'address'                 => 'nullable|string',
-            'date_of_birth'           => 'nullable|date',
-            'gender'                  => 'nullable|string|max:20',
-            'civil_status'            => 'nullable|string|max:30',
-            'emergency_contact_name'  => 'nullable|string|max:100',
-            'emergency_contact_number'=> 'nullable|string|max:20',
-            'department'              => 'nullable|string|max:100',
-            'date_hired'              => 'nullable|date',
-            'nbi_status'              => 'nullable|in:submitted,pending,not_required',
-            'medcert_status'          => 'nullable|in:submitted,pending,not_required',
-            'police_clearance_status' => 'nullable|in:submitted,pending,not_required',
-            'contract_status'         => 'nullable|in:submitted,pending,not_required',
-            'sss'                     => 'nullable|string|max:50',
-            'pagibig'                 => 'nullable|string|max:50',
-            'philhealth'              => 'nullable|string|max:50',
-            'tin'                     => 'nullable|string|max:50',
-            'requirements_status'     => 'nullable|in:complete,incomplete,pending',
-            'custom_fields'           => 'nullable|array',
-            'branch_ids'              => 'nullable|array',
-            'branch_ids.*'            => 'exists:branches,id',
-        ]);
-
-        if (!empty($validated['password'])) {
-            $validated['password'] = Hash::make($validated['password']);
-        } else {
-            unset($validated['password']);
-        }
-
-        if (!empty($validated['role'])) {
-            $user->syncRoles([$validated['role']]);
-            unset($validated['role']);
-        }
-
-        if (isset($validated['branch_ids'])) {
-            $user->branches()->sync($validated['branch_ids']);
-            unset($validated['branch_ids']);
-        }
-
-        $user->update($validated);
-
-        return response()->json([
-            'message' => 'User updated successfully.',
-            'user'    => $user->load(['roles', 'branches'])->append('profile_photo_url'),
-        ]);
+    // Must be admin OR updating their own profile
+    if (!$isAdmin && !$isSelf) {
+        return response()->json(['message' => 'Unauthorized.'], 403);
     }
+
+    // Non-admins can only update these fields on their own profile
+    $selfEditableFields = [
+        'name', 'contact_number', 'address', 'date_of_birth',
+        'age', 'gender', 'civil_status',
+        'emergency_contact_name', 'emergency_contact_number',
+    ];
+
+    $validated = $request->validate([
+        'name'                     => 'sometimes|string|max:255',
+        'email'                    => 'sometimes|email|unique:users,email,' . $user->id,
+        'password'                 => 'nullable|string|min:8',
+        'role'                     => 'nullable|string|exists:roles,name',
+        'is_active'                => 'boolean',
+        'contact_number'           => 'nullable|string|max:20',
+        'address'                  => 'nullable|string',
+        'date_of_birth'            => 'nullable|date',
+        'age'                      => 'nullable|integer',
+        'gender'                   => 'nullable|string|max:20',
+        'civil_status'             => 'nullable|string|max:30',
+        'emergency_contact_name'   => 'nullable|string|max:100',
+        'emergency_contact_number' => 'nullable|string|max:20',
+        'department'               => 'nullable|string|max:100',
+        'date_hired'               => 'nullable|date',
+        'date_ended'               => 'nullable|date',
+        'date_resigned'            => 'nullable|date',
+        'daily_rate'               => 'nullable|numeric',
+        'employment_status'        => 'nullable|string|max:50',
+        'source'                   => 'nullable|string|max:100',
+        'remarks'                  => 'nullable|string',
+        'nbi_status'               => 'nullable|in:submitted,pending,not_required',
+        'medcert_status'           => 'nullable|in:submitted,pending,not_required',
+        'police_clearance_status'  => 'nullable|in:submitted,pending,not_required',
+        'contract_status'          => 'nullable|in:submitted,pending,not_required',
+        'sss'                      => 'nullable|string|max:50',
+        'pagibig'                  => 'nullable|string|max:50',
+        'philhealth'               => 'nullable|string|max:50',
+        'tin'                      => 'nullable|string|max:50',
+        'requirements_status'      => 'nullable|in:complete,incomplete,pending',
+        'custom_fields'            => 'nullable|array',
+        'branch_ids'               => 'nullable|array',
+        'branch_ids.*'             => 'exists:branches,id',
+    ]);
+
+    // Strip admin-only fields if the requester is not an admin
+    if (!$isAdmin) {
+        $validated = array_intersect_key($validated, array_flip($selfEditableFields));
+    }
+
+    if (!empty($validated['password'])) {
+        $validated['password'] = Hash::make($validated['password']);
+    } else {
+        unset($validated['password']);
+    }
+
+    if ($isAdmin && !empty($validated['role'])) {
+        $user->syncRoles([$validated['role']]);
+        unset($validated['role']);
+    }
+
+    if ($isAdmin && isset($validated['branch_ids'])) {
+        $user->branches()->sync($validated['branch_ids']);
+        unset($validated['branch_ids']);
+    }
+
+    $user->update($validated);
+
+    return response()->json([
+        'message' => 'User updated successfully.',
+        'user'    => $user->load(['roles', 'branches'])->append('profile_photo_url'),
+    ]);
+}
 
     // ── Upload Profile Photo ───────────────────────────────────────────────────
 
