@@ -62,28 +62,33 @@ class ReportController extends Controller
     }
 
     // ── Applicants by Branch ───────────────────────────────────────────────────
-    public function applicantsByBranch(Request $request)
-    {
-        $query = Applicant::select(
-                'branches.branch_name',
-                DB::raw('count(*) as count')
-            )
-            ->join('branches', 'applicants.branch_id', '=', 'branches.id')
-            ->groupBy('branches.id', 'branches.branch_name')
-            ->orderByDesc('count');
+    // ── Applicants by Branch ───────────────────────────────────────────────────
+public function applicantsByBranch(Request $request)
+{
+    $query = Applicant::select(
+            'branches.id as branch_id',
+            'branches.branch_name',
+            'clients.id as client_id',        // ← added
+            'clients.name as client_name',    // ← added
+            DB::raw('count(*) as count')
+        )
+        ->join('branches', 'applicants.branch_id', '=', 'branches.id')
+        ->join('clients', 'branches.client_id', '=', 'clients.id')   // ← added
+        ->groupBy('branches.id', 'branches.branch_name', 'clients.id', 'clients.name')
+        ->orderByDesc('count');
 
-        $this->applyDateFilter($query, $request);
+    $this->applyDateFilter($query, $request);
 
-        if ($request->filled('client_id')) {
-            $query->where('branches.client_id', $request->client_id);
-        }
-
-        if ($request->filled('branch_id')) {
-            $query->where('applicants.branch_id', $request->branch_id);
-        }
-
-        return response()->json(['data' => $query->get()]);
+    if ($request->filled('client_id')) {
+        $query->where('branches.client_id', $request->client_id);
     }
+
+    if ($request->filled('branch_id')) {
+        $query->where('applicants.branch_id', $request->branch_id);
+    }
+
+    return response()->json(['data' => $query->get()]);
+}
 
     // ── Workflow Conversion Funnel ─────────────────────────────────────────────
     public function conversionRate(Request $request)

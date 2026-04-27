@@ -203,12 +203,14 @@ class ApplicantController extends Controller
 
     public function store(Request $request)
     {
+        
         $validated = $request->validate([
             'full_name' => 'required|string|max:255',
             'email'     => 'required|email|unique:applicants,email',
             'phone'     => 'required|string|max:20',
             'source'    => 'required|string',
             'branch_id' => 'required|exists:branches,id',
+            'position'   => 'nullable|string|max:255',
             'resume'    => 'nullable|file|mimes:pdf,doc,docx|max:5120',
             'notes'     => 'nullable|string',
         ]);
@@ -236,8 +238,8 @@ class ApplicantController extends Controller
         $validated['current_step_id'] = $firstStep?->id;
         $validated['applied_at']      = now();
         $validated['created_by']      = auth()->id();
-
         $applicant = Applicant::create($validated);
+        $validated['status']          = 'active'; 
 
         $applicant->activities()->create([
             'user_id'       => auth()->id(),

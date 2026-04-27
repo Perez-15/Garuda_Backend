@@ -24,6 +24,7 @@ class Applicant extends Model
         'status',
         'created_by', 
         'custom_fields',
+        'position',
     ];
 
     protected $casts = [
