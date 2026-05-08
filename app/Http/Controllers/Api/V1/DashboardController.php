@@ -17,7 +17,7 @@ class DashboardController extends Controller
     {
         // ── Stat Cards ────────────────────────────────────────────────────────
 
-        $hiredEmployees         = Employee::whereNull('employment_status')->count();
+        $hiredEmployees         = Employee::active()->count();
         $inProcess              = Applicant::where('status', 'active')->count();
         $totalBranches          = Branch::count();
         $incompleteRequirements = Employee::where('requirements_status', 'incomplete')->count();
@@ -45,35 +45,41 @@ class DashboardController extends Controller
             $end   = (clone $start)->endOfWeek();
 
             return [
-                'week'  => 'W' . $start->format('W'), // or use $start->format('M d')
+                'week'  => $start->format('M d'),
                 'count' => Employee::whereBetween('date_hired', [$start, $end])->count(),
             ];
         })->values();
 
-        // ── Applicants by Source ──────────────────────────────────────────────
+        // ── Prospects by Status ───────────────────────────────────────────────
 
-        $applicantsBySource = Applicant::select('source', DB::raw('count(*) as count'))
-            ->whereNotNull('source')
-            ->groupBy('source')
+        $prospectsByStatus = DB::table('client_prospects')
+            ->select('status', DB::raw('count(*) as count'))
+            ->whereNull('deleted_at')
+            ->whereNotNull('status')
+            ->groupBy('status')
             ->orderByDesc('count')
             ->get();
+
+        $totalProspects = DB::table('client_prospects')
+            ->whereNull('deleted_at')
+            ->count();
 
         // ── Branch Overview ───────────────────────────────────────────────────
 
         $branchOverview = Branch::with('client')
             ->get()
             ->map(function ($branch) {
-                $totalEmployees  = Employee::where('branch_id', $branch->id)
-                                           ->whereNull('employment_status')
+                $totalEmployees = Employee::where('branch_id', $branch->id)
+                                          ->active()
+                                          ->count();
+
+                $inProcess      = Applicant::where('branch_id', $branch->id)
+                                           ->where('status', 'active')
                                            ->count();
 
-                $inProcess       = Applicant::where('branch_id', $branch->id)
-                                            ->where('status', 'active')
-                                            ->count();
-
-                $incompleteDocs  = Employee::where('branch_id', $branch->id)
-                                           ->where('requirements_status', 'incomplete')
-                                           ->count();
+                $incompleteDocs = Employee::where('branch_id', $branch->id)
+                                          ->where('requirements_status', 'incomplete')
+                                          ->count();
 
                 return [
                     'branch_name'     => $branch->branch_name,
@@ -117,8 +123,9 @@ class DashboardController extends Controller
                 'incomplete_requirements' => $incompleteRequirements,
             ],
             'hired_per_month'      => $hiredPerMonth,
-            'hired_per_week'       => $hiredPerWeek, // ✅ ADDED
-            'applicants_by_source' => $applicantsBySource,
+            'hired_per_week'       => $hiredPerWeek,
+            'prospects_by_status'  => $prospectsByStatus,
+            'total_prospects'      => $totalProspects,
             'branch_overview'      => $branchOverview,
             'recent_activity'      => $recentActivity,
         ]);

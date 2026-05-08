@@ -35,6 +35,7 @@ Route::prefix('v1/public')->group(function () {
     Route::post('/contact',      [MarketingContactInquiryController::class, 'store']); // ← new
 });
 
+Route::get('v1/attendance/team/export', [AttendanceController::class, 'exportPdf']);
 /*
 |--------------------------------------------------------------------------
 | Authentication Routes
@@ -104,11 +105,11 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::delete('/users/{user}/photo',       [UserController::class, 'deletePhoto']);
 
     // ── Attendance ─────────────────────────────────────────────────────────────
-    Route::get('attendance/today',      [AttendanceController::class, 'today']);
-    Route::get('attendance/team',       [AttendanceController::class, 'team']);
-    Route::get('attendance',            [AttendanceController::class, 'index']);
-    Route::post('attendance/time-in',   [AttendanceController::class, 'timeIn']);
-    Route::patch('attendance/time-out', [AttendanceController::class, 'timeOut']);
+Route::get('attendance/today',       [AttendanceController::class, 'today']);
+Route::get('attendance/team',        [AttendanceController::class, 'team']);
+Route::get('attendance',             [AttendanceController::class, 'index']);
+Route::post('attendance/time-in',    [AttendanceController::class, 'timeIn']);
+Route::patch('attendance/time-out',  [AttendanceController::class, 'timeOut']);
 
     // ── Dashboard ──────────────────────────────────────────────────────────────
     Route::get('/dashboard', [DashboardController::class, 'index']);
@@ -156,7 +157,6 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // ── Branches ───────────────────────────────────────────────────────────────
     Route::apiResource('branches', BranchController::class);
     Route::get('clients/{client}/branches', [BranchController::class, 'byClient']);
-
     // ── Workflows ──────────────────────────────────────────────────────────────
     Route::apiResource('workflows', WorkflowController::class);
     Route::get('branches/{branch}/workflows',         [WorkflowController::class, 'byBranch']);

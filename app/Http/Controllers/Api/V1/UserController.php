@@ -40,9 +40,9 @@ class UserController extends Controller
             $query->whereHas('roles', fn($q) => $q->where('name', $roleName));
         }
 
-        if ($request->filled('is_active')) {
-            $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
-        }
+        if ($request->filled('employment_status')) {
+    $query->where('employment_status', $request->employment_status);
+}
 
         if ($request->filled('requirements_status')) {
             $query->where('requirements_status', $request->requirements_status);
@@ -55,7 +55,13 @@ class UserController extends Controller
         $perPage = in_array((int) $request->get('per_page'), [15, 30, 50])
             ? (int) $request->get('per_page') : 15;
 
-        $users = $query->orderBy('name')->paginate($perPage);
+       $allowedSorts = ['name', 'date_hired'];
+$allowedDirs  = ['asc', 'desc'];
+
+$sort      = in_array($request->get('sort'), $allowedSorts) ? $request->get('sort') : 'date_hired';
+$direction = in_array($request->get('direction'), $allowedDirs) ? $request->get('direction') : 'desc';
+
+$users = $query->orderBy($sort, $direction)->paginate($perPage);
 
         // Append profile_photo_url to each user
         $users->getCollection()->transform(function ($user) {
@@ -87,6 +93,7 @@ class UserController extends Controller
             'emergency_contact_number'=> 'nullable|string|max:20',
             'department'              => 'nullable|string|max:100',
             'date_hired'              => 'nullable|date',
+            'employment_status'       => 'nullable|string|max:50',
             'nbi_status'              => 'nullable|in:submitted,pending,not_required',
             'medcert_status'          => 'nullable|in:submitted,pending,not_required',
             'police_clearance_status' => 'nullable|in:submitted,pending,not_required',

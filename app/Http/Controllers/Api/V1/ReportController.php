@@ -61,7 +61,7 @@ class ReportController extends Controller
         return response()->json(['data' => $query->get()]);
     }
 
-    // ── Applicants by Branch ───────────────────────────────────────────────────
+    
     // ── Applicants by Branch ───────────────────────────────────────────────────
 public function applicantsByBranch(Request $request)
 {
@@ -77,7 +77,7 @@ public function applicantsByBranch(Request $request)
         ->groupBy('branches.id', 'branches.branch_name', 'clients.id', 'clients.name')
         ->orderByDesc('count');
 
-    $this->applyDateFilter($query, $request);
+    $this->applyDateFilter($query, $request );
 
     if ($request->filled('client_id')) {
         $query->where('branches.client_id', $request->client_id);
@@ -211,6 +211,8 @@ public function applicantsByBranch(Request $request)
 
         $applicants = $query->get();
 
+        
+
         // 2. Summary
         $totalApplicants = $applicants->count();
         $hired           = $applicants->where('status', 'hired')->count();
@@ -283,6 +285,19 @@ public function applicantsByBranch(Request $request)
                 return $recruiter;
             });
 
+            // Add before the PDF generation (step 5 area)
+$prospectsByStatus = DB::table('client_prospects')
+    ->select('status', DB::raw('count(*) as count'))
+    ->whereNull('deleted_at')
+    ->whereNotNull('status')
+    ->groupBy('status')
+    ->orderByDesc('count')
+    ->get();
+
+$totalProspects = DB::table('client_prospects')
+    ->whereNull('deleted_at')
+    ->count();
+
         // 6. Generate PDF
         $pdf = Pdf::loadView('reports.export', [
             'companyName'     => 'Garuda Recruitment Agency',
@@ -298,8 +313,12 @@ public function applicantsByBranch(Request $request)
             'recruiters'      => $recruiters,
             'startDate'       => $request->start_date,
             'endDate'         => $request->end_date,
+            'prospectsByStatus' => $prospectsByStatus,
+            'totalProspects'    => $totalProspects,
         ]);
 
         return $pdf->download('garuda-report-' . now()->format('Y-m-d') . '.pdf');
     }
+
+    
 }

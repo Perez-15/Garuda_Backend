@@ -111,22 +111,22 @@ class CustomColumnController extends Controller
     // ── POST /custom-columns/reorder ──────────────────────────────────────────
     // Bulk update the order of all columns for a page
     // Body: { page: 'hired', order: [1, 2, 3, ...] }
-    public function reorder(Request $request)
-    {
-        $request->validate([
-            'page'    => 'required|string',
-            'order'   => 'required|array',
-            'order.*' => 'integer',
-        ]);
+  public function reorder(Request $request)
+{
+    $request->validate([
+        'page'      => 'required|string',
+        'order'     => 'required|array',
+        'order.*'   => 'string', // field_key strings, not integers
+    ]);
 
-        foreach ($request->order as $position => $id) {
-            CustomColumn::where('id', $id)
-                ->where('page', $request->page)
-                ->update(['order' => $position]);
-        }
-
-        return response()->json(['message' => 'Columns reordered successfully.']);
+    foreach ($request->order as $position => $field_key) {
+        CustomColumn::where('page', $request->page)
+            ->where('field_key', $field_key)
+            ->update(['order' => $position + 1]);
     }
+
+    return response()->json(['message' => 'Columns reordered successfully.']);
+}
 
     // ═════════════════════════════════════════════════════════════════════════
     // TABLE MANAGEMENT
@@ -231,40 +231,27 @@ class CustomColumnController extends Controller
         ]);
     }
 
-    public function batch(Request $request)
+  public function batch(Request $request)
 {
     $page    = $request->input('page');
     $columns = $request->input('columns', []);
 
     DB::transaction(function () use ($page, $columns) {
-        $incoming_ids = collect($columns)->pluck('id')->filter()->values();
-
-        // delete rows not in incoming list (that aren't fixed — safety)
-        DB::table('custom_columns')
-            ->where('page', $page)
-            ->where('is_fixed', 0)
-            ->whereNotIn('id', $incoming_ids)
-            ->delete();
-
         foreach ($columns as $col) {
-            if (!empty($col['id'])) {
-                DB::table('custom_columns')->where('id', $col['id'])->update([
-                    'section'  => $col['section'],
-                    'label'    => $col['label'],
-                    'type'     => $col['type'],
-                    'options'  => $col['options'],
-                    'required' => $col['required'],
-                    'order'    => $col['order'],
-                    'updated_at' => now(),
-                ]);
-            } else {
+            // Only insert if field_key doesn't already exist for this page
+            $exists = DB::table('custom_columns')
+                ->where('page', $page)
+                ->where('field_key', $col['field_key'])
+                ->exists();
+
+            if (!$exists) {
                 DB::table('custom_columns')->insert([
                     'page'       => $page,
                     'section'    => $col['section'],
                     'field_key'  => $col['field_key'],
                     'label'      => $col['label'],
                     'type'       => $col['type'],
-                    'options'    => $col['options'],
+                    'options'    => $col['options'] ?? null,
                     'required'   => $col['required'] ?? 0,
                     'is_fixed'   => 0,
                     'order'      => $col['order'],
