@@ -201,58 +201,69 @@ class ApplicantController extends Controller
 
     // ── Store ──────────────────────────────────────────────────────────────────
 
-    public function store(Request $request)
-    {
-        
-        $validated = $request->validate([
-            'full_name' => 'required|string|max:255',
-            'email'     => 'required|email|unique:applicants,email',
-            'phone'     => 'required|string|max:20',
-            'source'    => 'required|string',
-            'branch_id' => 'required|exists:branches,id',
-            'position'   => 'nullable|string|max:255',
-            'resume'    => 'nullable|file|mimes:pdf,doc,docx|max:5120',
-            'notes'     => 'nullable|string',
-        ]);
+   public function store(Request $request)
+{
+    $validated = $request->validate([
+        'full_name' => 'required|string|max:255',
+        'email'     => 'required|email|unique:applicants,email',
+        'phone'     => 'required|string|max:20',
+        'source'    => 'required|string',
+        'branch_id' => 'required|exists:branches,id',
+        'position'  => 'nullable|string|max:255',
+        'resume'    => 'nullable|file|mimes:pdf,doc,docx|max:5120',
+        'notes'     => 'nullable|string',
+    ]);
 
-        $branchIds = $this->allowedBranchIds();
-        if ($branchIds !== null && !in_array($validated['branch_id'], $branchIds)) {
-            return response()->json(['message' => 'You are not assigned to this branch.'], 403);
-        }
-
-        $workflow = Workflow::where('branch_id', $validated['branch_id'])
-            ->where('is_active', true)
-            ->first();
-
-        if (!$workflow) {
-            return response()->json(['message' => 'No active workflow found for this branch.'], 400);
-        }
-
-        $firstStep = $workflow->steps()->orderBy('step_order')->first();
-
-        if ($request->hasFile('resume')) {
-            $validated['resume_path'] = $request->file('resume')->store('resumes', 'public');
-        }
-
-        $validated['workflow_id']     = $workflow->id;
-        $validated['current_step_id'] = $firstStep?->id;
-        $validated['applied_at']      = now();
-        $validated['created_by']      = auth()->id();
-        $applicant = Applicant::create($validated);
-        $validated['status']          = 'active'; 
-
-        $applicant->activities()->create([
-            'user_id'       => auth()->id(),
-            'activity_type' => 'created',
-            'description'   => 'Applicant created',
-        ]);
-
-        return response()->json([
-            'message'   => 'Applicant created successfully',
-            'applicant' => $applicant->load(['branch.client', 'workflow', 'currentStep', 'createdBy']),
-        ], 201);
+    $branchIds = $this->allowedBranchIds();
+    if ($branchIds !== null && !in_array($validated['branch_id'], $branchIds)) {
+        return response()->json(['message' => 'You are not assigned to this branch.'], 403);
     }
 
+    $workflow = Workflow::where('branch_id', $validated['branch_id'])
+        ->where('is_active', true)
+        ->first();
+
+    if (!$workflow) {
+        return response()->json(['message' => 'No active workflow found for this branch.'], 400);
+    }
+
+    $firstStep = $workflow->steps()->orderBy('step_order')->first();
+
+    if ($request->hasFile('resume')) {
+        $validated['resume_path'] = $request->file('resume')->store('resumes', 'public');
+    }
+
+    // Extract notes before passing to create() since it's no longer fillable
+    $noteText = $validated['notes'] ?? null;
+    unset($validated['notes']);
+
+    $validated['workflow_id']     = $workflow->id;
+    $validated['current_step_id'] = $firstStep?->id;
+    $validated['applied_at']      = now();
+    $validated['created_by']      = auth()->id();
+    $validated['status']          = 'active'; // ← moved BEFORE create()
+
+    $applicant = Applicant::create($validated);
+
+    $applicant->activities()->create([
+        'user_id'       => auth()->id(),
+        'activity_type' => 'created',
+        'description'   => 'Applicant created',
+    ]);
+
+    if ($noteText) {
+        ApplicantNote::create([
+            'applicant_id' => $applicant->id,
+            'user_id'      => auth()->id(),
+            'note'         => $noteText,
+        ]);
+    }
+
+    return response()->json([
+        'message'   => 'Applicant created successfully',
+        'applicant' => $applicant->load(['branch.client', 'workflow', 'currentStep', 'createdBy']),
+    ], 201);
+}
     // ── Show ───────────────────────────────────────────────────────────────────
 
     public function show(Applicant $applicant)
@@ -272,42 +283,54 @@ class ApplicantController extends Controller
 
     // ── Update ─────────────────────────────────────────────────────────────────
 
-    public function update(Request $request, Applicant $applicant)
-    {
-        if (!$this->canModify($applicant)) {
-            return response()->json(['message' => 'You can only edit applicants you added.'], 403);
+   public function update(Request $request, Applicant $applicant)
+{
+    if (!$this->canModify($applicant)) {
+        return response()->json(['message' => 'You can only edit applicants you added.'], 403);
+    }
+
+    $validated = $request->validate([
+        'full_name' => 'sometimes|string|max:255',
+        'email'     => 'sometimes|email|unique:applicants,email,' . $applicant->id,
+        'phone'     => 'sometimes|string|max:20',
+        'source'    => 'sometimes|string',
+        'notes'     => 'nullable|string',
+        'resume'    => 'nullable|file|mimes:pdf,doc,docx|max:5120',
+    ]);
+
+    if ($request->hasFile('resume')) {
+        if ($applicant->resume_path) {
+            Storage::disk('public')->delete($applicant->resume_path);
         }
+        $validated['resume_path'] = $request->file('resume')->store('resumes', 'public');
+    }
 
-        $validated = $request->validate([
-            'full_name' => 'sometimes|string|max:255',
-            'email'     => 'sometimes|email|unique:applicants,email,' . $applicant->id,
-            'phone'     => 'sometimes|string|max:20',
-            'source'    => 'sometimes|string',
-            'notes'     => 'nullable|string',
-            'resume'    => 'nullable|file|mimes:pdf,doc,docx|max:5120',
-        ]);
+    // Extract notes before update() since it's no longer fillable
+    $noteText = $validated['notes'] ?? null;
+    unset($validated['notes']);
 
-        if ($request->hasFile('resume')) {
-            if ($applicant->resume_path) {
-                Storage::disk('public')->delete($applicant->resume_path);
-            }
-            $validated['resume_path'] = $request->file('resume')->store('resumes', 'public');
-        }
+    $applicant->update($validated);
 
-        $applicant->update($validated);
-
-        $applicant->activities()->create([
-            'user_id'       => auth()->id(),
-            'activity_type' => 'updated',
-            'description'   => 'Applicant information updated',
-        ]);
-
-        return response()->json([
-            'message'   => 'Applicant updated successfully',
-            'applicant' => $applicant->load(['branch.client', 'workflow', 'currentStep', 'createdBy']),
+    // Save note separately if provided
+    if ($noteText) {
+        ApplicantNote::create([
+            'applicant_id' => $applicant->id,
+            'user_id'      => auth()->id(),
+            'note'         => $noteText,
         ]);
     }
 
+    $applicant->activities()->create([
+        'user_id'       => auth()->id(),
+        'activity_type' => 'updated',
+        'description'   => 'Applicant information updated',
+    ]);
+
+    return response()->json([
+        'message'   => 'Applicant updated successfully',
+        'applicant' => $applicant->load(['branch.client', 'workflow', 'currentStep', 'createdBy']),
+    ]);
+}
     // ── Destroy (soft delete) ──────────────────────────────────────────────────
 
     public function destroy(Applicant $applicant)
@@ -519,25 +542,37 @@ public function forceDelete(int $id)
 
     // ── Update Custom Fields ───────────────────────────────────────────────────
 
-    public function updateCustomFields(Request $request, Applicant $applicant)
-    {
-        if (!$this->canModify($applicant)) {
-            return response()->json(['message' => 'You can only update applicants you added.'], 403);
-        }
-
-        $existing = $applicant->custom_fields ?? [];
-        $applicant->custom_fields = array_merge($existing, $request->all());
-        $applicant->save();
-
-        $applicant->activities()->create([
-            'user_id'       => auth()->id(),
-            'activity_type' => 'updated',
-            'description'   => 'Custom fields updated',
-        ]);
-
-        return response()->json([
-            'message'       => 'Custom fields updated.',
-            'custom_fields' => $applicant->custom_fields,
-        ]);
+   public function updateCustomFields(Request $request, Applicant $applicant)
+{
+    if (!$this->canModify($applicant)) {
+        return response()->json(['message' => 'You can only update applicants you added.'], 403);
     }
+
+    // Whitelist only keys defined as custom columns for this page
+    $validKeys = \App\Models\CustomColumn::where('page', 'in_process')
+        ->where('is_fixed', false)
+        ->pluck('field_key')
+        ->toArray();
+
+    if (empty($validKeys)) {
+        return response()->json(['message' => 'No custom columns defined for this page.'], 422);
+    }
+
+    $incoming = $request->only($validKeys);
+
+    $existing = $applicant->custom_fields ?? [];
+    $applicant->custom_fields = array_merge($existing, $incoming);
+    $applicant->save();
+
+    $applicant->activities()->create([
+        'user_id'       => auth()->id(),
+        'activity_type' => 'updated',
+        'description'   => 'Custom fields updated',
+    ]);
+
+    return response()->json([
+        'message'       => 'Custom fields updated.',
+        'custom_fields' => $applicant->custom_fields,
+    ]);
+}
 }

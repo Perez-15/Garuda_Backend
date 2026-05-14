@@ -8,7 +8,7 @@ use App\Models\JobPosting;
 class JobPostingController extends Controller
 {
     /**
-     * Return all active job postings for the public marketing website.
+     * Return all active job postings for the public TA website.
      * No authentication required.
      */
     public function index()

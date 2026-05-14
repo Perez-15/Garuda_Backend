@@ -10,7 +10,7 @@ class AuthController extends Controller
 {
     /**
      * Login for marketing dashboard users.
-     * Only users with the 'marketing' role can access the marketing dashboard.
+     * Only talent_acquisition, hr_admin, and super_admin can access.
      */
     public function login(Request $request)
     {
@@ -27,11 +27,11 @@ class AuthController extends Controller
 
         $user = Auth::user();
 
-        // Only allow marketing role users
-        if (!$user->hasAnyRole(['marketing', 'super_admin', 'hr_admin'])) {
+        // Only allow talent_acquisition, hr_admin, and super_admin
+        if (!$user->hasAnyRole(['talent_acquisition', 'super_admin', 'hr_admin'])) {
             Auth::logout();
             return response()->json([
-                'message' => 'Access denied. Marketing access only.',
+                'message' => 'Access denied. Authorized personnel only.',
             ], 403);
         }
 

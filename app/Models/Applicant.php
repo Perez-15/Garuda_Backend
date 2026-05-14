@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Storage;
 
 class Applicant extends Model
 {
@@ -19,7 +20,6 @@ class Applicant extends Model
         'workflow_id',
         'current_step_id',
         'resume_path',
-        'notes',
         'applied_at',
         'status',
         'created_by', 
@@ -67,6 +67,16 @@ class Applicant extends Model
     public function employee()
 {
     return $this->hasOne(Employee::class, 'applicant_id');
+}
+
+// In Applicant.php
+protected $appends = ['resume_url'];
+
+public function getResumeUrlAttribute(): ?string
+{
+    return $this->resume_path
+        ? asset('storage/' . $this->resume_path)
+        : null;
 }
 
     // Helper method to move to next step
