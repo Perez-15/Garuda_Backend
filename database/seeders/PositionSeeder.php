@@ -25,14 +25,14 @@ class PositionSeeder extends Seeder
 
         // Branches (must match BranchSeeder exactly)
         $taguigBranch = Branch::where('branch_name', 'Mang Inasal Taguig')->first();
-        $taytayBranch = Branch::where('branch_name', 'Mang Inasal Taytay')->first();
+        $velasquezBranch = Branch::where('branch_name', 'Mang Inasal Velasquez')->first();
 
         if (!$taguigBranch) {
             throw new \Exception("Branch 'Mang Inasal Taguig' not found. Check BranchSeeder.");
         }
 
-        if (!$taytayBranch) {
-            throw new \Exception("Branch 'Mang Inasal Taytay' not found. Check BranchSeeder.");
+        if (!$velasquezBranch) {
+            throw new \Exception("Branch 'Mang Inasal Velasquez' not found. Check BranchSeeder.");
         }
 
         // Positions - Mang Inasal Taguig
@@ -54,10 +54,10 @@ class PositionSeeder extends Seeder
             'is_active' => true,
         ]);
 
-        // Positions - Mang Inasal Taytay
+        // Positions - Mang Inasal Velasquez
         Position::create([
             'client_id' => $mangInasal->id,
-            'branch_id' => $taytayBranch->id,
+            'branch_id' => $velasquezBranch->id,
             'title' => 'Server',
             'description' => 'Serve customers and take orders',
             'slots' => 4,
