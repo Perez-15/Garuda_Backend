@@ -11,19 +11,19 @@ class PositionSeeder extends Seeder
 {
     public function run(): void
     {
-        // Get clients (fail fast if missing)
+        // Clients (must match ClientSeeder exactly)
         $mangInasal = Client::where('name', 'Mang Inasal')->first();
-        $smRetail = Client::where('name', 'SM Retail')->first();
+        $burlington = Client::where('name', 'Burlington')->first();
 
         if (!$mangInasal) {
             throw new \Exception("Client 'Mang Inasal' not found. Check ClientSeeder.");
         }
 
-        if (!$smRetail) {
-            throw new \Exception("Client 'SM Retail' not found. Check ClientSeeder.");
+        if (!$burlington) {
+            throw new \Exception("Client 'Burlington' not found. Check ClientSeeder.");
         }
 
-        // Get branches (fail fast if missing)
+        // Branches (must match BranchSeeder exactly)
         $taguigBranch = Branch::where('branch_name', 'Mang Inasal Taguig')->first();
         $taytayBranch = Branch::where('branch_name', 'Mang Inasal Taytay')->first();
 
@@ -35,7 +35,7 @@ class PositionSeeder extends Seeder
             throw new \Exception("Branch 'Mang Inasal Taytay' not found. Check BranchSeeder.");
         }
 
-        // Positions
+        // Positions - Mang Inasal Taguig
         Position::create([
             'client_id' => $mangInasal->id,
             'branch_id' => $taguigBranch->id,
@@ -54,6 +54,7 @@ class PositionSeeder extends Seeder
             'is_active' => true,
         ]);
 
+        // Positions - Mang Inasal Taytay
         Position::create([
             'client_id' => $mangInasal->id,
             'branch_id' => $taytayBranch->id,
@@ -63,11 +64,12 @@ class PositionSeeder extends Seeder
             'is_active' => true,
         ]);
 
+        // Positions - Burlington (no branch)
         Position::create([
-            'client_id' => $smRetail->id,
+            'client_id' => $burlington->id,
             'branch_id' => null,
             'title' => 'Sales Associate',
-            'description' => 'Assist customers with purchases',
+            'description' => 'Assist customers with retail products',
             'slots' => 10,
             'is_active' => true,
         ]);
