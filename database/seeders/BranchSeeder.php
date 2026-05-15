@@ -8,49 +8,34 @@ use App\Models\Client;
 
 class BranchSeeder extends Seeder
 {
-    public function run(): void
-    {
-        $mangInasal = Client::where('name', 'Mang Inasal')->first();
-        $Burlington = Client::where('name', 'Burlington')->first();
-        $Jaicom = Client::where('name', 'Jaicom BPO Inc.')->first();
+   public function run(): void
+{
+    $mangInasal = Client::where('name', 'Mang Inasal')->first();
+    $burlington = Client::where('name', 'Burlington')->first();
+    $jaicom = Client::where('name', 'Jaicom BPO Inc.')->first();
 
-        // Mang Inasal Branches
-        Branch::create([
-            'client_id' => $mangInasal->id,
-            'branch_name' => 'Mang Inasal Taguig',
-            'location' => 'Taguig City',
-            'is_active' => true,
-        ]);
+    Branch::firstOrCreate(['branch_name' => 'Mang Inasal Taguig'], [
+        'client_id' => $mangInasal->id, 'location' => 'Taguig City', 'is_active' => true,
+    ]);
 
-        Branch::create([
-            'client_id' => $mangInasal->id,
-            'branch_name' => 'Mang Inasal Velasquez',
-            'location' => 'Taytay, Rizal',
-            'is_active' => true,
-        ]);
+    Branch::firstOrCreate(['branch_name' => 'Mang Inasal Velasquez'], [
+        'client_id' => $mangInasal->id, 'location' => 'Taytay, Rizal', 'is_active' => true,
+    ]);
 
-        Branch::create([
-            'client_id' => $mangInasal->id,
-            'branch_name' => 'Mang Inasal Ejercito',
-            'location' => 'C6, Taytay, Rizal',
-            'is_active' => true,
-        ]);
+    Branch::firstOrCreate(['branch_name' => 'Mang Inasal Ejercito'], [
+        'client_id' => $mangInasal->id, 'location' => 'C6, Taytay, Rizal', 'is_active' => true,
+    ]);
 
-        // SM Retail Branches
-        Branch::create([
-            'client_id' => $mangInasal->id,
-            'branch_name' => 'Mang Inasal Marikina Bayan',
-            'location' => 'Marikina City',
-            'is_active' => true,
-        ]);
+    Branch::firstOrCreate(['branch_name' => 'Mang Inasal Marikina Bayan'], [
+        'client_id' => $mangInasal->id, 'location' => 'Marikina City', 'is_active' => true,
+    ]);
 
-        Branch::create([
-            'client_id' => $Burlington->id,
-            'branch_name' => 'Burlington SM North',
-            'location' => 'Quezon City City',
-            'is_active' => true,
-        ]);
+    Branch::firstOrCreate(['branch_name' => 'Jaicom Ortigas Center'], [
+        'client_id' => $jaicom->id, 'location' => 'Ortigas Center', 'is_active' => true,
+    ]);
 
-       
-    }
+    Branch::firstOrCreate(['branch_name' => 'Burlington SM North'], [
+        'client_id' => $burlington->id, 'location' => 'Quezon City', 'is_active' => true,
+    ]);
+}
 }
