@@ -32,7 +32,7 @@ return [
     'http://127.0.0.1:5501',
     'http://localhost:5501',
 
-    'https://garuda-frontend-hdf12xhbb-perez-15s-projects.vercel.app',
+    'https://garuda-frontend-gray.vercel.app',
 ],
     'allowed_origins_patterns' => [],
 
