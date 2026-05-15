@@ -11,12 +11,31 @@ class PositionSeeder extends Seeder
 {
     public function run(): void
     {
+        // Get clients (fail fast if missing)
         $mangInasal = Client::where('name', 'Mang Inasal')->first();
         $smRetail = Client::where('name', 'SM Retail')->first();
 
+        if (!$mangInasal) {
+            throw new \Exception("Client 'Mang Inasal' not found. Check ClientSeeder.");
+        }
+
+        if (!$smRetail) {
+            throw new \Exception("Client 'SM Retail' not found. Check ClientSeeder.");
+        }
+
+        // Get branches (fail fast if missing)
         $taguigBranch = Branch::where('branch_name', 'Mang Inasal Taguig')->first();
         $taytayBranch = Branch::where('branch_name', 'Mang Inasal Taytay')->first();
 
+        if (!$taguigBranch) {
+            throw new \Exception("Branch 'Mang Inasal Taguig' not found. Check BranchSeeder.");
+        }
+
+        if (!$taytayBranch) {
+            throw new \Exception("Branch 'Mang Inasal Taytay' not found. Check BranchSeeder.");
+        }
+
+        // Positions
         Position::create([
             'client_id' => $mangInasal->id,
             'branch_id' => $taguigBranch->id,
