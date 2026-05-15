@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Storage;
 class ApplicationController extends Controller
 {
     /**
-     * Receive a job application from the public marketing website.
+     * Receive a job application from the public TA website.
      * No authentication required.
      * Stores into website_applications (staging table) — HR reviews from Garuda.
      */
