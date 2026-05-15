@@ -39,4 +39,5 @@ RUN echo '<Directory /var/www/html/public>\n\
 CMD bash -c "sed -i \"s/Listen 80/Listen \${PORT:-80}/g\" /etc/apache2/ports.conf && \
              sed -i \"s/:80>/:${PORT:-80}>/g\" /etc/apache2/sites-available/000-default.conf && \
              php artisan migrate --force && \
+            php artisan db:seed --force && \
              apache2-foreground"
