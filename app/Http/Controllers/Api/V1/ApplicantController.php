@@ -294,8 +294,10 @@ class ApplicantController extends Controller
         'email'     => 'sometimes|email|unique:applicants,email,' . $applicant->id,
         'phone'     => 'sometimes|string|max:20',
         'source'    => 'sometimes|string',
+        'position'  => 'sometimes|nullable|string|max:255',
         'notes'     => 'nullable|string',
         'resume'    => 'nullable|file|mimes:pdf,doc,docx|max:5120',
+
     ]);
 
     if ($request->hasFile('resume')) {

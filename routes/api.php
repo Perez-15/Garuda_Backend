@@ -25,7 +25,7 @@ use App\Http\Controllers\Api\Marketing\JobPostingController as MarketingJobPosti
 use App\Http\Controllers\Api\Marketing\ContactInquiryController as MarketingContactInquiryController;
 use App\Http\Controllers\Api\V1\ClientProspectController;
 
-// force redeploy 2026-05-16
+
 
 /*
 |--------------------------------------------------------------------------
@@ -134,6 +134,7 @@ Route::patch('attendance/time-out',  [AttendanceController::class, 'timeOut']);
     Route::post('applicants/{applicant}/notes',           [ApplicantController::class, 'addNote']);
     Route::get('applicants/{applicant}/activities',       [ApplicantController::class, 'activities']);
     Route::get('applicants/{applicant}/resume-url', [ApplicantController::class, 'resumeUrl']);
+    Route::post('{id}/set-step', [ApplicantController::class, 'setStep']);
 
     // ── Employees (External / Hired) ───────────────────────────────────────────
     // IMPORTANT: named routes (stats, trashed, convert) must come BEFORE apiResource
