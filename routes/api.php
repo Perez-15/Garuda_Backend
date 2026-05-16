@@ -24,6 +24,9 @@ use App\Http\Controllers\Api\Marketing\AuthController as MarketingAuthController
 use App\Http\Controllers\Api\Marketing\JobPostingController as MarketingJobPostingController;
 use App\Http\Controllers\Api\Marketing\ContactInquiryController as MarketingContactInquiryController;
 use App\Http\Controllers\Api\V1\ClientProspectController;
+
+// force redeploy 2026-05-16
+
 /*
 |--------------------------------------------------------------------------
 | Public API Routes (No Authentication Required)
