@@ -130,6 +130,7 @@ Route::patch('attendance/time-out',  [AttendanceController::class, 'timeOut']);
     Route::patch('applicants/{applicant}/custom-fields',  [ApplicantController::class, 'updateCustomFields']);
     Route::post('applicants/{applicant}/notes',           [ApplicantController::class, 'addNote']);
     Route::get('applicants/{applicant}/activities',       [ApplicantController::class, 'activities']);
+    Route::get('applicants/{applicant}/resume-url', [ApplicantController::class, 'resumeUrl']);
 
     // ── Employees (External / Hired) ───────────────────────────────────────────
     // IMPORTANT: named routes (stats, trashed, convert) must come BEFORE apiResource

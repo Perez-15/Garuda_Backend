@@ -230,7 +230,7 @@ class ApplicantController extends Controller
     $firstStep = $workflow->steps()->orderBy('step_order')->first();
 
     if ($request->hasFile('resume')) {
-        $validated['resume_path'] = $request->file('resume')->store('resumes', 'public');
+        $validated['resume_path'] = $request->file('resume')->store('resumes', 'private');
     }
 
     // Extract notes before passing to create() since it's no longer fillable
@@ -300,9 +300,9 @@ class ApplicantController extends Controller
 
     if ($request->hasFile('resume')) {
         if ($applicant->resume_path) {
-            Storage::disk('public')->delete($applicant->resume_path);
+            Storage::disk('private')->delete($applicant->resume_path);
         }
-        $validated['resume_path'] = $request->file('resume')->store('resumes', 'public');
+        $validated['resume_path'] = $request->file('resume')->store('resumes', 'private');
     }
 
     // Extract notes before update() since it's no longer fillable
@@ -345,7 +345,7 @@ class ApplicantController extends Controller
             }
 
             if ($applicant->resume_path) {
-                Storage::disk('public')->delete($applicant->resume_path);
+                Storage::disk('private')->delete($applicant->resume_path);
             }
 
             $applicant->delete();
@@ -418,10 +418,10 @@ public function forceDelete(int $id)
     DB::transaction(function () use ($applicant) {
         $linked = Employee::withTrashed()->where('applicant_id', $applicant->id)->first();
         if ($linked) {
-            if ($linked->profile_photo) Storage::disk(config('filesystems.default'))->delete($linked->profile_photo);
+            if ($linked->profile_photo) Storage::disk('private')->delete($linked->profile_photo);
             $linked->forceDelete();
         }
-        if ($applicant->resume_path) Storage::disk('public')->delete($applicant->resume_path);
+        if ($applicant->resume_path) Storage::disk('private')->delete($applicant->resume_path);
         $applicant->forceDelete();
     });
 
@@ -574,5 +574,20 @@ public function forceDelete(int $id)
         'message'       => 'Custom fields updated.',
         'custom_fields' => $applicant->custom_fields,
     ]);
+}
+
+public function resumeUrl(Applicant $applicant)
+{
+    if (!$applicant->resume_path) {
+        return response()->json(['message' => 'No resume on file.'], 404);
+    }
+
+    // Generates a temporary signed URL (15 minutes)
+    $url = Storage::disk('private')->temporaryUrl(
+        $applicant->resume_path,
+        now()->addMinutes(15)
+    );
+
+    return response()->json(['url' => $url]);
 }
 }
