@@ -33,6 +33,7 @@ return [
     'http://localhost:5501',
 
     'https://garuda-frontend-gray.vercel.app',
+    'https://garuda-marketing-website.vercel.app',
 ],
     'allowed_origins_patterns' => [],
 
