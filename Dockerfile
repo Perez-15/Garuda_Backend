@@ -40,4 +40,6 @@ CMD bash -c "sed -i \"s/Listen 80/Listen \${PORT:-80}/g\" /etc/apache2/ports.con
              sed -i \"s/:80>/:${PORT:-80}>/g\" /etc/apache2/sites-available/000-default.conf && \
              php artisan migrate --force && \
             php artisan db:seed --force && \
+             composer dump-autoload --optimize && \
+             php artisan optimize:clear && \
              apache2-foreground"
