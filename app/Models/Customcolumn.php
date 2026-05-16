@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class CustomColumn extends Model
 
-// force redeploy 2026-05-16
+// force redeploy 2026-05-16..
 {
     protected $fillable = [
         'page',
