@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class CustomColumn extends Model
+
+// force redeploy 2026-05-16
 {
     protected $fillable = [
         'page',
@@ -31,4 +33,5 @@ class CustomColumn extends Model
     {
         return $this->belongsTo(User::class, 'created_by');
     }
+
 }
